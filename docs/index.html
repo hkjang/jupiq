@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>jupiq — 오프라인망 AI Workspace Control Plane</title>
+  <meta name="description" content="분리된 JupyterHub의 사용자·서버와 Pod·CPU·메모리를 한 화면에서 운영하세요. 선택형 GPU·LLM 관측, 기간별 통계, 감사와 스트리밍 AI proxy를 오프라인망에서 제공합니다.">
+  <meta name="keywords" content="JupyterHub 통합관리, GPU 모니터링, 오프라인망 AI, AI Workspace Control Plane, Kubernetes, Prometheus, Keycloak">
+  <meta name="theme-color" content="#0b1730">
+  <link rel="canonical" href="https://hkjang.github.io/jupiq/">
+  <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml">
+  <link rel="manifest" href="./site.webmanifest">
+  <link rel="stylesheet" href="./assets/css/site.css">
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="ko_KR">
+  <meta property="og:site_name" content="jupiq">
+  <meta property="og:title" content="jupiq — AI Workspace Control Plane">
+  <meta property="og:description" content="분리된 JupyterHub와 AI 인프라를 하나의 운영 화면으로 연결합니다.">
+  <meta property="og:url" content="https://hkjang.github.io/jupiq/">
+  <meta property="og:image" content="https://hkjang.github.io/jupiq/assets/og-image.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="jupiq — AI Workspace Control Plane">
+  <meta name="twitter:description" content="실시간 사용 현황, 기간별 통계와 감사 가능한 서버 관리를 제공하는 오프라인망 통합 운영 플랫폼">
+  <meta name="twitter:image" content="https://hkjang.github.io/jupiq/assets/og-image.png">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "SoftwareApplication",
+        "name": "jupiq",
+        "applicationCategory": "BusinessApplication",
+        "operatingSystem": "Linux, Docker",
+        "softwareVersion": "1.0.0",
+        "url": "https://hkjang.github.io/jupiq/",
+        "downloadUrl": "https://github.com/hkjang/jupiq/releases",
+        "description": "분리된 JupyterHub와 AI 인프라를 통합 관리하는 오프라인망 AI Workspace Control Plane",
+        "license": "https://opensource.org/license/mit",
+        "offers": {"@type": "Offer", "price": "0", "priceCurrency": "KRW"}
+      },
+      {
+        "@type": "FAQPage",
+        "mainEntity": [
+          {"@type": "Question", "name": "jupiq는 인터넷이 없는 망에서도 운영할 수 있나요?", "acceptedAnswer": {"@type": "Answer", "text": "네. GitHub Release의 단일 Docker 이미지 tar.gz를 반입해 docker load로 설치하며, 실행 시 PostgreSQL DSN과 부트스트랩 관리자 정보 및 암호화 키 네 환경변수만 필요합니다."}},
+          {"@type": "Question", "name": "여러 JupyterHub를 어떻게 통합하나요?", "acceptedAnswer": {"@type": "Answer", "text": "각 Hub의 REST API와 선택형 Prometheus·Kubernetes 연동을 Agentless 방식으로 연결하고 중앙 PostgreSQL에 최신 상태와 집계 데이터를 저장합니다."}},
+          {"@type": "Question", "name": "망이 끊기면 기존 데이터는 사라지나요?", "acceptedAnswer": {"@type": "Answer", "text": "아니요. 마지막 성공 snapshot을 유지하고 자료의 Fresh 또는 Stale 상태와 수집에 실패한 Hub의 Degraded 상태를 표시합니다. 다음 수집 주기에 동기화를 다시 시도합니다."}},
+          {"@type": "Question", "name": "GPU와 LLM 사용량 모니터링은 필수인가요?", "acceptedAnswer": {"@type": "Answer", "text": "아닙니다. 두 기능 모두 기본 OFF인 선택 기능이며, 비활성 상태에서는 관련 수집·쿼리·메뉴·KPI가 꺼지고 핵심 서비스에는 영향을 주지 않습니다."}}
+        ]
+      }
+    ]
+  }
+  </script>
+  <script src="./assets/js/site.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+  <header class="site-header">
+    <div class="container nav-wrap">
+      <a class="brand" href="./" aria-label="jupiq 홈"><img src="./assets/logo.svg" alt="jupiq"></a>
+      <button class="menu-button" type="button" aria-expanded="false" aria-controls="site-menu" data-menu-button>메뉴</button>
+      <nav class="site-nav" id="site-menu" aria-label="주요 메뉴" data-menu>
+        <a href="./features/">기능</a><a href="./architecture/">아키텍처</a><a href="./security/">보안</a>
+        <a href="./install/">설치</a><a href="./user-guide/">사용자 가이드</a><a href="./admin-guide/">관리자 가이드</a>
+        <a class="nav-cta" href="https://github.com/hkjang/jupiq">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero">
+      <div class="container hero-grid">
+        <div>
+          <div class="kicker"><span class="status-dot"></span> 오프라인망을 위한 통합 운영 플랫폼</div>
+          <h1>누가, 어디서, 얼마나 쓰는지<br><span>지금 바로 보세요.</span></h1>
+          <p class="lede">분리된 JupyterHub의 사용자·서버와 Pod·자원 메트릭을 한 화면으로 연결합니다. 실시간 상태, 일·주·월 통계, 감사 가능한 서버 동작과 선택형 GPU·LLM 관측을 제공합니다.</p>
+          <div class="actions">
+            <a class="button primary" href="./install/">오프라인 설치 보기</a>
+            <a class="button secondary" href="#screens">화면 둘러보기</a>
+          </div>
+          <div class="hero-notes"><span>Go + React</span><span>Keycloak OIDC</span><span>PostgreSQL</span><span>단일 Docker 이미지</span></div>
+        </div>
+        <div class="live-panel" aria-label="실시간 사용 현황 예시">
+          <div class="panel-top"><span>통합 사용 현황 · 지금</span><span class="fresh">12초 전 수집</span></div>
+          <div class="kpi-row">
+            <div class="mini-kpi"><strong>87</strong><span>현재 활성 사용자</span></div>
+            <div class="mini-kpi"><strong>103</strong><span>실행 서버</span></div>
+            <div class="mini-kpi"><strong>62%</strong><span>선택 GPU Util</span></div>
+          </div>
+          <div class="usage-chart" aria-hidden="true">
+            <span class="bar" style="height:34%"></span><span class="bar" style="height:43%"></span><span class="bar" style="height:58%"></span><span class="bar" style="height:49%"></span><span class="bar" style="height:70%"></span><span class="bar" style="height:82%"></span><span class="bar" style="height:64%"></span><span class="bar" style="height:91%"></span><span class="bar" style="height:76%"></span><span class="bar" style="height:68%"></span><span class="bar" style="height:80%"></span><span class="bar" style="height:72%"></span>
+          </div>
+          <div class="network-row"><strong>업무망</strong><span>42명 · 서버 48</span><span class="pill ok">Fresh</span></div>
+          <div class="network-row"><strong>개발망</strong><span>31명 · 서버 39</span><span class="pill ok">Fresh</span></div>
+          <div class="network-row"><strong>분석망</strong><span>마지막 수집 8분 전</span><span class="pill warn">Stale</span></div>
+        </div>
+      </div>
+    </section>
+
+    <div class="trust-strip">
+      <div class="container trust-grid">
+        <div class="trust-item"><strong>Agentless 우선</strong><span>Hub REST API 중심</span></div>
+        <div class="trust-item"><strong>망 단절 내성</strong><span>마지막 데이터 유지</span></div>
+        <div class="trust-item"><strong>4개 환경변수</strong><span>나머지는 관리자 UI</span></div>
+        <div class="trust-item"><strong>기본 한국어</strong><span>가시성 높은 운영 UI</span></div>
+      </div>
+    </div>
+
+    <section class="section white" id="value">
+      <div class="container">
+        <p class="eyebrow">Operational clarity</p>
+        <h2>숫자보다 먼저, 운영 맥락을 보여줍니다</h2>
+        <p class="lede">수집 시각과 연결 상태를 숨기지 않고, 요약에서 원인까지 자연스럽게 내려갈 수 있게 설계했습니다.</p>
+        <div class="grid-3" style="margin-top:38px">
+          <article class="card feature-card" data-reveal><div class="icon-box mint">실</div><h3>실시간 이용 현황</h3><p>현재 접속 사용자, 실행 서버, CPU·메모리·선택형 GPU 사용량을 망·부서·사용자 기준으로 즉시 파악합니다.</p></article>
+          <article class="card feature-card" data-reveal><div class="icon-box amber">시</div><h3>신선도와 Hub 상태</h3><p>Fresh·Stale 자료와 healthy·degraded Hub 상태, 마지막 갱신 시각을 함께 보여 오래된 값을 현재값으로 오해하지 않게 합니다.</p></article>
+          <article class="card feature-card" data-reveal><div class="icon-box">추</div><h3>일·주·월 상세</h3><p>전체 DAU·WAU·MAU와 사용자별 로그인·서버 실행시간·CPU·메모리 평균/최대를 확인합니다.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container metric-feature">
+        <div data-reveal>
+          <p class="eyebrow">Usage intelligence</p>
+          <h2>실시간 현황과 기간별 통계를 함께</h2>
+          <p class="lede">SSE 실시간 snapshot과 일·주·월 집계를 구분해 보여주고, 사용자 상세에서 Hub·서버·이용 통계·Timeline을 확인합니다.</p>
+          <ul class="feature-list"><li>전체 DAU·WAU·MAU와 서버 실행시간</li><li>실시간 망·Hub·부서·프로젝트 필터</li><li>CPU core·메모리 byte와 선택형 GPU Util·VRAM</li><li>REST API와 읽기 전용 MCP 4개 도구</li></ul>
+        </div>
+        <div class="metric-canvas" data-reveal aria-label="일주월 이용 통계 예시">
+          <div class="tab-row"><span class="tab active">일</span><span class="tab">주</span><span class="tab">월</span><span class="tab">사용자</span></div>
+          <div class="line-chart">
+            <svg viewBox="0 0 600 190" preserveAspectRatio="none" aria-hidden="true"><path d="M0 158 C50 143 67 150 102 120 S171 124 205 89 S273 102 307 76 S371 96 409 56 S475 81 514 41 S570 58 600 23" fill="none" stroke="#487dff" stroke-width="5"/><path d="M0 176 C58 166 90 169 132 154 S201 158 246 132 S325 145 366 114 S451 128 488 99 S555 113 600 78" fill="none" stroke="#19a98f" stroke-width="4" opacity=".82"/></svg>
+          </div>
+          <div class="drill-path"><span>전체 412명</span><span>개발망 160명</span><span>AI플랫폼팀 34명</span><span>user01</span><span>서버·Timeline</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section dark">
+      <div class="container center">
+        <p class="eyebrow light">Integration diagnostics</p>
+        <h2>저장하기 전에, 연동 가능성을 먼저 진단합니다</h2>
+        <p class="lede">Keycloak·JupyterHub·Prometheus·Kubernetes·AI·Webhook 설정마다 현재 폼값으로 연동별 실제 HTTP 호출을 실행하고 단계 결과와 응답시간을 보여줍니다.</p>
+        <div class="grid-3" style="margin-top:38px;text-align:left">
+          <div class="architecture-node"><div><strong>주소·TLS</strong><span>URL 형식과 시스템 CA 기반 TLS</span></div></div>
+          <div class="architecture-node"><div><strong>실제 endpoint</strong><span>Discovery · info · query · version · models</span></div></div>
+          <div class="architecture-node"><div><strong>단계 결과</strong><span>HTTP 상태 · 소요시간 · 실패 조치 안내</span></div></div>
+        </div>
+        <p class="small" style="margin-top:24px">테스트 결과는 저장 전 확인할 수 있고, 저장·변경·실패 이력은 감사로그에 남습니다.</p>
+      </div>
+    </section>
+
+    <section class="section white">
+      <div class="container">
+        <div class="center"><p class="eyebrow">Control plane</p><h2>모니터링과 서버 동작을 하나의 운영 흐름으로</h2><p class="lede">실시간 조회, 운영 카탈로그, permission 기반 제어와 조건부 서버 동작 승인을 한 화면에 연결합니다.</p></div>
+        <div class="grid-3" style="margin-top:42px">
+          <article class="card"><div class="icon-box">허</div><h3>멀티 Hub 통합</h3><p class="muted">사용자·서버·버전을 동기화하고 시작·중지·재시작을 중앙에서 제어합니다.</p></article>
+          <article class="card"><div class="icon-box mint">자</div><h3>Pod와 자원</h3><p class="muted">Kubernetes Pod·NodeName과 Prometheus CPU·메모리, 선택형 GPU Util·VRAM을 연결합니다.</p></article>
+          <article class="card"><div class="icon-box amber">정</div><h3>카탈로그와 승인</h3><p class="muted">정책·Profile·Image·프로젝트를 CRUD로 관리하고 설정 시 서버 동작에 검토·승인을 적용합니다.</p></article>
+          <article class="card"><div class="icon-box mint">키</div><h3>키 수명주기</h3><p class="muted">연동 비밀은 암호화·마스킹하고 개인 API 키는 scope·만료·즉시 회전을 관리합니다.</p></article>
+          <article class="card"><div class="icon-box">감</div><h3>감사와 Timeline</h3><p class="muted">설정·서버 동작·승인·키 작업과 사용자 서버 이벤트의 결과를 추적합니다.</p></article>
+          <article class="card"><div class="icon-box amber">AI</div><h3>스트리밍 AI proxy</h3><p class="muted">최대 256K 토큰 설정을 지원하고 OpenAI-compatible upstream SSE를 브라우저로 전달합니다.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="screens">
+      <div class="container">
+        <p class="eyebrow">Product gallery</p><h2>운영자가 매일 보는 화면</h2>
+        <p class="lede">검증된 실제 제품 캡처에는 비식별 데모 데이터만 사용하며 개인정보와 내부 주소를 포함하지 않습니다.</p>
+        <div class="actions"><a class="button dark" href="./screenshots/">전체 27개 화면 보기</a></div>
+        <div class="screenshot-grid">
+          <figure class="screenshot-card featured" data-reveal><div class="screenshot-frame"><img src="./assets/screenshots/realtime-usage.webp" alt="실시간 사용자와 자원 사용 현황 대시보드" loading="lazy" data-screenshot><div class="screenshot-placeholder" hidden><span class="placeholder-title">실시간 사용 현황</span><span>현재 사용자 · 실행 서버 · CPU/GPU · 망별 상태</span><div class="placeholder-bars"></div></div></div><figcaption><strong>1. 누가 얼마나 사용 중인지</strong><span>현재 활성 사용자와 서버·자원을 망/부서/사용자 단위로 즉시 확인합니다.</span></figcaption></figure>
+          <figure class="screenshot-card" data-reveal><div class="screenshot-frame"><img src="./assets/screenshots/data-freshness.webp" alt="망별 데이터 신선도와 Hub 상태" loading="lazy" data-screenshot><div class="screenshot-placeholder" hidden><span class="placeholder-title">데이터 신선도</span><span>Fresh · Stale · Healthy · Degraded · 마지막 갱신</span><div class="placeholder-bars"></div></div></div><figcaption><strong>2. 신선도와 Hub 상태</strong><span>오래된 자료와 수집 실패 Hub를 구분하고 마지막 성공 snapshot을 유지합니다.</span></figcaption></figure>
+          <figure class="screenshot-card" data-reveal><div class="screenshot-frame"><img src="./assets/screenshots/usage-drilldown.webp" alt="일주월 이용 통계와 드릴다운" loading="lazy" data-screenshot><div class="screenshot-placeholder" hidden><span class="placeholder-title">일·주·월 통계</span><span>전체 → 망 → 부서 → 사용자 → 세션</span><div class="placeholder-bars"></div></div></div><figcaption><strong>3. 이용 추세와 드릴다운</strong><span>집계 숫자에서 실제 세션 근거까지 자연스럽게 내려갑니다.</span></figcaption></figure>
+          <figure class="screenshot-card" data-reveal><div class="screenshot-frame"><img src="./assets/screenshots/integrated-dashboard.webp" alt="통합 KPI 대시보드" loading="lazy" data-screenshot><div class="screenshot-placeholder" hidden><span class="placeholder-title">통합 KPI</span><span>Hub · 사용자 · 서버 · 장애 · Idle</span><div class="placeholder-bars"></div></div></div><figcaption><strong>통합 대시보드</strong><span>운영 우선순위를 한눈에 파악합니다.</span></figcaption></figure>
+          <figure class="screenshot-card" data-reveal><div class="screenshot-frame"><img src="./assets/screenshots/gpu-efficiency.webp" alt="GPU 효율 분석 화면" loading="lazy" data-screenshot><div class="screenshot-placeholder" hidden><span class="placeholder-title">선택형 GPU 분석</span><span>사용률 · VRAM · Idle · Waste Score</span><div class="placeholder-bars"></div></div></div><figcaption><strong>GPU 효율</strong><span>관리자가 켠 환경에서만 수집·메뉴·KPI가 활성화됩니다.</span></figcaption></figure>
+          <figure class="screenshot-card" data-reveal><div class="screenshot-frame"><img src="./assets/screenshots/hub-management.webp" alt="JupyterHub 등록 및 연결 진단 화면" loading="lazy" data-screenshot><div class="screenshot-placeholder" hidden><span class="placeholder-title">Hub 연동</span><span>TLS · 버전 · 인증 · 권한 · 응답시간</span><div class="placeholder-bars"></div></div></div><figcaption><strong>Hub 관리와 즉시 진단</strong><span>저장 전에 실제 연결과 최소 권한을 단계별로 확인합니다.</span></figcaption></figure>
+          <figure class="screenshot-card" data-reveal><div class="screenshot-frame"><img src="./assets/screenshots/user-detail.webp" alt="사용자 360도 상세 화면" loading="lazy" data-screenshot><div class="screenshot-placeholder" hidden><span class="placeholder-title">사용자 360도</span><span>Hub · 서버 · 활동 · 자원 · Timeline</span><div class="placeholder-bars"></div></div></div><figcaption><strong>사용자 상세</strong><span>망을 넘나드는 사용 현황과 관리자 조치를 하나로 연결합니다.</span></figcaption></figure>
+          <figure class="screenshot-card" data-reveal><div class="screenshot-frame"><img src="./assets/screenshots/server-control.webp" alt="Notebook 서버 통합 제어 화면" loading="lazy" data-screenshot><div class="screenshot-placeholder" hidden><span class="placeholder-title">서버 제어</span><span>Start · Stop · Restart · 승인 · 감사</span><div class="placeholder-bars"></div></div></div><figcaption><strong>Notebook 서버 제어</strong><span>위험 동작은 대상과 사유를 확인하고 결과를 감사로 남깁니다.</span></figcaption></figure>
+          <figure class="screenshot-card" data-reveal><div class="screenshot-frame"><img src="./assets/screenshots/admin-settings.webp" alt="서비스 관리자 설정 화면" loading="lazy" data-screenshot><div class="screenshot-placeholder" hidden><span class="placeholder-title">서비스 관리자 설정</span><span>연동 · 기능 · Workflow · 키 정책 · 역할</span><div class="placeholder-bars"></div></div></div><figcaption><strong>관리자 설정</strong><span>네 필수 환경변수 외 운영 설정을 permission으로 보호된 관리자 페이지에서 관리합니다.</span></figcaption></figure>
+          <figure class="screenshot-card" data-reveal><div class="screenshot-frame"><img src="./assets/screenshots/login.webp" alt="Keycloak SSO 로그인과 서비스 버전 화면" loading="lazy" data-screenshot><div class="screenshot-placeholder" hidden><span class="placeholder-title">로그인</span><span>Keycloak SSO · Bootstrap · Version</span><div class="placeholder-bars"></div></div></div><figcaption><strong>로그인과 버전</strong><span>로그인 전에도 현재 서비스 버전을 확인할 수 있습니다.</span></figcaption></figure>
+          <figure class="screenshot-card" data-reveal><div class="screenshot-frame"><img src="./assets/screenshots/profile-menu.webp" alt="개인화 프로필 컨텍스트 메뉴" loading="lazy" data-screenshot><div class="screenshot-placeholder" hidden><span class="placeholder-title">개인화</span><span>프로필 · 로컬 비밀번호 · 개인 API 키 · Version</span><div class="placeholder-bars"></div></div></div><figcaption><strong>프로필과 개인화</strong><span>서비스 관리와 분리된 개인 설정에서 키 회전과 버전을 확인합니다.</span></figcaption></figure>
+          <figure class="screenshot-card" data-reveal><div class="screenshot-frame"><img src="./assets/screenshots/ai-copilot.webp" alt="스트리밍 AI proxy 화면" loading="lazy" data-screenshot><div class="screenshot-placeholder" hidden><span class="placeholder-title">AI 운영 분석</span><span>OpenAI-compatible · SSE Streaming · 최대 256K</span><div class="placeholder-bars"></div></div></div><figcaption><strong>스트리밍 AI</strong><span>입력 메시지를 설정된 Provider로 전달하고 upstream SSE 응답을 실시간 표시합니다.</span></figcaption></figure>
+        </div>
+      </div>
+    </section>
+
+    <section class="section white">
+      <div class="container metric-feature">
+        <div>
+          <p class="eyebrow">Optional by design</p><h2>필요한 관측만 켜고, 나머지는 조용히 둡니다</h2>
+          <p class="lede">GPU와 LLM Chat Completions 사용량 모니터링은 기본 OFF입니다. 꺼져 있을 때 관련 수집·쿼리·메뉴·KPI를 만들지 않으며 기존 데이터는 보존합니다.</p>
+          <a class="button ghost" href="./admin-guide/#optional-monitoring">선택형 모니터링 설정</a>
+        </div>
+        <div class="grid-2">
+          <div class="card"><span class="pill info">기본 OFF</span><h3 style="margin-top:16px">GPU 모니터링</h3><p class="muted small">Prometheus와 NVIDIA DCGM Exporter가 준비된 경우에만 활성화합니다.</p></div>
+          <div class="card"><span class="pill info">기본 OFF</span><h3 style="margin-top:16px">LLM 사용량</h3><p class="muted small">프롬프트·응답 본문은 수집하지 않고 token metric이 없으면 calls·bytes만 집계합니다.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section dark">
+      <div class="container">
+        <div class="center"><p class="eyebrow light">Architecture</p><h2>망 분리를 유지하는 Agentless 중앙 관리</h2><p class="lede">Hub별 장애를 격리하고 중앙 DB의 최근 성공 데이터를 기반으로 UI와 API가 안정적으로 응답합니다.</p></div>
+        <div class="architecture" aria-label="jupiq 아키텍처">
+          <div class="architecture-node"><div><strong>JupyterHub · K8s</strong><span>REST API · Prometheus · DCGM</span></div></div><div class="architecture-arrow">→</div>
+          <div class="architecture-node"><div><strong>jupiq</strong><span>Go API · Collector · Policy · MCP</span></div></div><div class="architecture-arrow">→</div>
+          <div class="architecture-node"><div><strong>PostgreSQL</strong><span>상태 · 집계 · 설정 · 감사로그</span></div></div>
+        </div>
+        <div class="actions" style="justify-content:center"><a class="button secondary" href="./architecture/">상세 아키텍처 보기</a><a class="button secondary" href="./security/">보안 설계 보기</a></div>
+      </div>
+    </section>
+
+    <section class="section white" id="faq">
+      <div class="narrow"><div class="center"><p class="eyebrow">FAQ</p><h2>자주 묻는 질문</h2></div>
+        <div class="faq" style="margin-top:34px">
+          <details><summary>인터넷이 없는 망에서도 운영할 수 있나요?</summary><p>네. 릴리스의 <code>jupiq-v1.0.0.tar.gz</code>를 반입해 <code>docker load</code>로 설치합니다. 런타임에는 접근 가능한 PostgreSQL과 네 환경변수만 필요하며 외부 CDN이나 SaaS에 의존하지 않습니다.</p></details>
+          <details><summary>망이 끊기면 중앙 화면도 멈추나요?</summary><p>아닙니다. 해당 Hub를 Degraded로 표시하고 마지막 성공 snapshot을 유지합니다. 다음 고정 수집 주기에 다시 시도하며 다른 Hub 수집은 별도 goroutine에서 계속됩니다.</p></details>
+          <details><summary>Notebook 코드나 프롬프트를 수집하나요?</summary><p>Hub·자원 수집기는 코드·셀 내용·출력·LLM 프롬프트·응답 본문을 수집하지 않습니다. 다만 AI 채팅에 직접 입력한 메시지는 응답 생성을 위해 설정된 Provider로 전달됩니다.</p></details>
+          <details><summary>GPU 모니터링 없이도 쓸 수 있나요?</summary><p>네. GPU 모니터링은 초기 기본 OFF이며 JupyterHub 사용자·서버·카탈로그·감사 기능과 독립적입니다. ON 전에는 Prometheus와 DCGM 지표를 확인하세요.</p></details>
+          <details><summary>Keycloak이 장애 나면 어떻게 하나요?</summary><p>OIDC 상태를 진단하고 감사 가능한 Bootstrap 관리자 계정으로 긴급 접근할 수 있습니다. 운영에서는 강한 초기 비밀번호, 제한된 접근 경로, 즉시 비밀번호 변경 정책을 적용하세요.</p></details>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container cta-band"><p class="eyebrow light">Get started</p><h2>첫 번째 Hub를 연결할 준비가 되셨나요?</h2><p>단일 이미지를 반입하고 관리자 페이지에서 Keycloak과 JupyterHub 연결을 진단한 뒤 저장하세요.</p><div class="actions"><a class="button primary" href="./install/">설치 시작</a><a class="button secondary" href="./admin-guide/">관리자 가이드</a></div></div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container"><div class="footer-grid">
+      <div><img class="footer-logo" src="./assets/logo-inverse.svg" alt="jupiq"><p class="small">분리된 AI 업무공간을 하나의 운영 화면으로 연결합니다.</p></div>
+      <div><h3>제품</h3><a href="./features/">기능</a><a href="./screenshots/">전체 화면</a><a href="./architecture/">아키텍처</a><a href="./security/">보안</a></div>
+      <div><h3>가이드</h3><a href="./install/">설치</a><a href="./offline/">오프라인 운영</a><a href="./admin-guide/">관리자</a></div>
+      <div><h3>개발자</h3><a href="./api-mcp/">API·MCP</a><a href="./releases/">릴리스</a><a href="https://github.com/hkjang/jupiq">GitHub</a></div>
+    </div><div class="footer-bottom"><span>© <span data-year>2026</span> jupiq contributors · MIT License</span><span>Version 1.0.0</span></div></div>
+  </footer>
+</body>
+</html>

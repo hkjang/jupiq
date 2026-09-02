@@ -1,0 +1,12 @@
+{
+  "name": "jupiq — AI Workspace Control Plane",
+  "short_name": "jupiq",
+  "description": "분리된 JupyterHub와 AI 인프라를 통합 관리하는 오프라인망 Control Plane",
+  "start_url": "/jupiq/",
+  "display": "standalone",
+  "background_color": "#f4f7fb",
+  "theme_color": "#0b1730",
+  "icons": [
+    {"src": "/jupiq/assets/favicon.svg", "sizes": "any", "type": "image/svg+xml"}
+  ]
+}

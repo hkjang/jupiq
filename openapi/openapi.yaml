@@ -1,0 +1,716 @@
+openapi: 3.1.0
+info:
+  title: jupiq Control Plane API
+  version: 1.0.0
+  description: >-
+    오프라인망 JupyterHub 통합 운영, 사용량, 정책, 승인, AI 및 MCP API.
+    성공 응답은 기본적으로 data 필드를 사용하며 목록은 meta 페이지 정보를 포함한다.
+servers:
+  - url: /api/v1
+security:
+  - sessionCookie: []
+  - bearerAuth: []
+tags:
+  - name: Auth
+  - name: Operations
+  - name: Administration
+  - name: AI
+paths:
+  /version:
+    get:
+      security: []
+      operationId: getVersion
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+  /auth/login:
+    post:
+      security: []
+      tags: [Auth]
+      operationId: localLogin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string }
+                password: { type: string, format: password }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '401': { $ref: '#/components/responses/Error' }
+  /auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logout
+      responses:
+        '204': { description: 로그아웃 완료 }
+  /auth/password:
+    post:
+      tags: [Auth]
+      operationId: changeLocalPassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, new_password]
+              properties:
+                current_password: { type: string, format: password }
+                new_password: { type: string, format: password, minLength: 12 }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '400': { $ref: '#/components/responses/Error' }
+  /auth/me:
+    get:
+      tags: [Auth]
+      operationId: getCurrentUser
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+    patch:
+      tags: [Auth]
+      operationId: updateCurrentUser
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                display_name: { type: string }
+                email: { type: string, format: email }
+                department: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+  /auth/oidc/config:
+    get:
+      security: []
+      tags: [Auth]
+      operationId: getOIDCLoginConfig
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+  /auth/oidc/login:
+    get:
+      security: []
+      tags: [Auth]
+      operationId: startOIDCLogin
+      responses:
+        '302': { description: Keycloak authorization endpoint로 이동 }
+  /dashboard:
+    get:
+      tags: [Operations]
+      operationId: getDashboard
+      parameters:
+        - { name: hub, in: query, schema: { type: string } }
+        - { name: network, in: query, schema: { type: string } }
+        - { name: department, in: query, schema: { type: string } }
+        - { name: project, in: query, schema: { type: string } }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+  /dashboard/live:
+    get:
+      tags: [Operations]
+      operationId: streamDashboard
+      responses:
+        '200':
+          description: 5초 주기 기본 SSE data 이벤트
+          content:
+            text/event-stream:
+              schema: { type: string }
+  /usage:
+    get:
+      tags: [Operations]
+      operationId: getUsage
+      parameters:
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: granularity, in: query, schema: { type: string, enum: [hour, day, week, month] } }
+        - { name: group_by, in: query, schema: { type: string, enum: [user, hub, network, department, project] } }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+  /llm-usage:
+    get:
+      tags: [Operations]
+      operationId: getLLMUsage
+      parameters:
+        - { name: range, in: query, schema: { type: string, enum: [day, week, month] } }
+        - { name: group_by, in: query, schema: { type: string, enum: [user, pod, model] } }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+  /llm-usage/live:
+    get:
+      tags: [Operations]
+      operationId: streamLLMUsage
+      responses:
+        '200':
+          description: 실시간 SSE data 이벤트
+          content: { text/event-stream: { schema: { type: string } } }
+  /hubs:
+    get:
+      tags: [Administration]
+      operationId: listHubs
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+    post:
+      tags: [Administration]
+      operationId: createHub
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/HubWrite' }
+      responses:
+        '201': { $ref: '#/components/responses/Success' }
+  /hubs/{id}:
+    parameters:
+      - { $ref: '#/components/parameters/ID' }
+    get:
+      operationId: getHub
+      responses: { '200': { $ref: '#/components/responses/Success' } }
+    put:
+      operationId: updateHub
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/HubWrite' }
+      responses: { '200': { $ref: '#/components/responses/Success' } }
+    delete:
+      operationId: deleteHub
+      responses: { '204': { description: 삭제 완료 } }
+  /hubs/{id}/test:
+    post:
+      parameters: [{ $ref: '#/components/parameters/ID' }]
+      operationId: testHub
+      responses: { '200': { $ref: '#/components/responses/Success' } }
+  /hubs/{id}/sync:
+    post:
+      parameters: [{ $ref: '#/components/parameters/ID' }]
+      operationId: syncHub
+      responses: { '200': { $ref: '#/components/responses/Success' } }
+  /users:
+    get:
+      tags: [Operations]
+      operationId: listHubUsers
+      responses: { '200': { $ref: '#/components/responses/List' } }
+  /users/{username}:
+    get:
+      tags: [Operations]
+      operationId: getUserDetail360
+      summary: 사용자 360 상세 조회
+      description: >-
+        중앙 계정, Hub별 identity, 현재·과거 서버, 최근 메타데이터 timeline,
+        일·주·월 사용량 및 선택적 LLM 사용 메타데이터를 조회한다.
+        Notebook 코드, 셀 출력, AI prompt/response 본문은 수집하거나 반환하지 않는다.
+      x-required-permission: users:read
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._@+-]{0,127}$' }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 10000, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: include_llm
+          in: query
+          schema: { type: boolean, default: true }
+      responses:
+        '200':
+          description: 사용자 360 상세
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/UserDetail360' }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /local-users:
+    get:
+      tags: [Administration]
+      operationId: listServiceUsers
+      responses: { '200': { $ref: '#/components/responses/List' } }
+  /local-users/{id}/roles:
+    put:
+      tags: [Administration]
+      operationId: setServiceUserRoles
+      parameters: [{ $ref: '#/components/parameters/ID' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role_ids]
+              properties: { role_ids: { type: array, items: { type: integer, format: int64 } } }
+      responses: { '200': { $ref: '#/components/responses/Success' } }
+  /roles:
+    get:
+      tags: [Administration]
+      operationId: listRoles
+      responses: { '200': { $ref: '#/components/responses/Success' } }
+    post:
+      tags: [Administration]
+      operationId: createRole
+      requestBody: { $ref: '#/components/requestBodies/RoleWrite' }
+      responses: { '200': { $ref: '#/components/responses/Success' } }
+  /roles/{id}:
+    put:
+      tags: [Administration]
+      operationId: updateRole
+      parameters: [{ $ref: '#/components/parameters/ID' }]
+      requestBody: { $ref: '#/components/requestBodies/RoleWrite' }
+      responses: { '200': { $ref: '#/components/responses/Success' } }
+    delete:
+      tags: [Administration]
+      operationId: deleteRole
+      parameters: [{ $ref: '#/components/parameters/ID' }]
+      responses: { '204': { description: 삭제 완료 } }
+  /servers:
+    get:
+      tags: [Operations]
+      operationId: listServers
+      responses: { '200': { $ref: '#/components/responses/List' } }
+  /servers/{id}/{action}:
+    post:
+      tags: [Operations]
+      operationId: controlServer
+      parameters:
+        - { $ref: '#/components/parameters/ID' }
+        - { name: action, in: path, required: true, schema: { type: string, enum: [start, stop, restart] } }
+      responses:
+        '202': { $ref: '#/components/responses/Success' }
+  /approvals:
+    get:
+      tags: [Administration]
+      operationId: listApprovals
+      description: 승인 요청 목록. 상태는 pending_review, pending, executing, approved, rejected, failed 중 하나다.
+      responses: { '200': { $ref: '#/components/responses/List' } }
+  /approvals/{id}:
+    get:
+      tags: [Administration]
+      operationId: getApproval
+      parameters: [{ $ref: '#/components/parameters/ID' }]
+      responses: { '200': { $ref: '#/components/responses/Success' } }
+  /approvals/{id}/review:
+    post:
+      tags: [Administration]
+      operationId: reviewApproval
+      description: approval:review 권한으로 pending_review 요청을 pending으로 전이한다.
+      parameters: [{ $ref: '#/components/parameters/ID' }]
+      requestBody: { $ref: '#/components/requestBodies/ApprovalReason' }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '409': { $ref: '#/components/responses/Error' }
+  /approvals/{id}/approve:
+    post:
+      tags: [Administration]
+      operationId: approveRequest
+      description: pending을 원자적으로 executing으로 선점한 요청만 원격 작업을 수행한다.
+      parameters: [{ $ref: '#/components/parameters/ID' }]
+      requestBody: { $ref: '#/components/requestBodies/ApprovalReason' }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '409': { $ref: '#/components/responses/Error' }
+  /approvals/{id}/reject:
+    post:
+      tags: [Administration]
+      operationId: rejectRequest
+      description: pending_review 또는 pending 요청을 rejected로 전이한다.
+      parameters: [{ $ref: '#/components/parameters/ID' }]
+      requestBody: { $ref: '#/components/requestBodies/ApprovalReason' }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '409': { $ref: '#/components/responses/Error' }
+  /integrations/test:
+    post:
+      tags: [Administration]
+      operationId: testIntegration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, config]
+              properties:
+                type: { type: string, enum: [oidc, jupyterhub, prometheus, kubernetes, ai, webhook, llm_usage] }
+                config: { type: object, additionalProperties: true }
+                secret: { type: string, writeOnly: true }
+      responses: { '200': { $ref: '#/components/responses/Success' } }
+  /audit:
+    get:
+      tags: [Administration]
+      operationId: listAuditEvents
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: page_size, in: query, schema: { type: integer, minimum: 1, maximum: 200 } }
+      responses: { '200': { $ref: '#/components/responses/List' } }
+  /metrics:
+    get:
+      tags: [Operations]
+      operationId: listMetricSamples
+      parameters:
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: metric, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, maximum: 5000 } }
+      responses: { '200': { $ref: '#/components/responses/Success' } }
+  /gpus:
+    get:
+      tags: [Operations]
+      operationId: listGPUs
+      description: GPU 기능이 꺼져 있으면 feature_enabled=false와 빈 목록을 반환한다.
+      responses: { '200': { $ref: '#/components/responses/Success' } }
+  /settings:
+    get:
+      tags: [Administration]
+      operationId: getSettings
+      responses: { '200': { $ref: '#/components/responses/Success' } }
+    put:
+      tags: [Administration]
+      operationId: updateSettings
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses: { '200': { $ref: '#/components/responses/Success' } }
+  /keys:
+    get:
+      operationId: listPersonalKeys
+      responses: { '200': { $ref: '#/components/responses/Success' } }
+    post:
+      operationId: createPersonalKey
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                scopes: { type: array, items: { type: string } }
+                permissions: { type: array, items: { type: string }, description: scopes 별칭 }
+                expires_at: { type: string, format: date-time }
+                expires_in_days: { type: integer, minimum: 1 }
+      responses: { '201': { $ref: '#/components/responses/Success' } }
+  /keys/{id}/rotate:
+    post:
+      parameters: [{ $ref: '#/components/parameters/ID' }]
+      operationId: rotatePersonalKey
+      responses: { '200': { $ref: '#/components/responses/Success' } }
+  /keys/{id}/revoke:
+    post:
+      parameters: [{ $ref: '#/components/parameters/ID' }]
+      operationId: revokePersonalKey
+      responses: { '204': { description: 폐기 완료 } }
+  /ai/chat:
+    post:
+      tags: [AI]
+      operationId: streamAIChat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [messages]
+              properties:
+                model: { type: string }
+                messages: { type: array, items: { type: object, additionalProperties: true } }
+                max_tokens: { type: integer, minimum: 1, maximum: 262144 }
+                temperature: { type: number }
+      responses:
+        '200':
+          description: OpenAI 호환 SSE 스트림
+          content: { text/event-stream: { schema: { type: string } } }
+  /policies:
+    get: { tags: [Administration], operationId: listPolicies, responses: { '200': { $ref: '#/components/responses/List' } } }
+    post: { tags: [Administration], operationId: createPolicy, requestBody: { $ref: '#/components/requestBodies/ResourceWrite' }, responses: { '201': { $ref: '#/components/responses/Success' } } }
+  /policies/{id}:
+    get: { tags: [Administration], operationId: getPolicy, parameters: [{ $ref: '#/components/parameters/ID' }], responses: { '200': { $ref: '#/components/responses/Success' } } }
+    put: { tags: [Administration], operationId: updatePolicy, parameters: [{ $ref: '#/components/parameters/ID' }], requestBody: { $ref: '#/components/requestBodies/ResourceWrite' }, responses: { '200': { $ref: '#/components/responses/Success' } } }
+    delete: { tags: [Administration], operationId: deletePolicy, parameters: [{ $ref: '#/components/parameters/ID' }], responses: { '204': { description: 삭제 완료 } } }
+  /profiles:
+    get: { tags: [Administration], operationId: listProfiles, responses: { '200': { $ref: '#/components/responses/List' } } }
+    post: { tags: [Administration], operationId: createProfile, requestBody: { $ref: '#/components/requestBodies/ResourceWrite' }, responses: { '201': { $ref: '#/components/responses/Success' } } }
+  /profiles/{id}:
+    get: { tags: [Administration], operationId: getProfile, parameters: [{ $ref: '#/components/parameters/ID' }], responses: { '200': { $ref: '#/components/responses/Success' } } }
+    put: { tags: [Administration], operationId: updateProfile, parameters: [{ $ref: '#/components/parameters/ID' }], requestBody: { $ref: '#/components/requestBodies/ResourceWrite' }, responses: { '200': { $ref: '#/components/responses/Success' } } }
+    delete: { tags: [Administration], operationId: deleteProfile, parameters: [{ $ref: '#/components/parameters/ID' }], responses: { '204': { description: 삭제 완료 } } }
+  /images:
+    get: { tags: [Administration], operationId: listImages, responses: { '200': { $ref: '#/components/responses/List' } } }
+    post: { tags: [Administration], operationId: createImage, requestBody: { $ref: '#/components/requestBodies/ResourceWrite' }, responses: { '201': { $ref: '#/components/responses/Success' } } }
+  /images/{id}:
+    get: { tags: [Administration], operationId: getImage, parameters: [{ $ref: '#/components/parameters/ID' }], responses: { '200': { $ref: '#/components/responses/Success' } } }
+    put: { tags: [Administration], operationId: updateImage, parameters: [{ $ref: '#/components/parameters/ID' }], requestBody: { $ref: '#/components/requestBodies/ResourceWrite' }, responses: { '200': { $ref: '#/components/responses/Success' } } }
+    delete: { tags: [Administration], operationId: deleteImage, parameters: [{ $ref: '#/components/parameters/ID' }], responses: { '204': { description: 삭제 완료 } } }
+  /projects:
+    get: { tags: [Administration], operationId: listProjects, responses: { '200': { $ref: '#/components/responses/List' } } }
+    post: { tags: [Administration], operationId: createProject, requestBody: { $ref: '#/components/requestBodies/ResourceWrite' }, responses: { '201': { $ref: '#/components/responses/Success' } } }
+  /projects/{id}:
+    get: { tags: [Administration], operationId: getProject, parameters: [{ $ref: '#/components/parameters/ID' }], responses: { '200': { $ref: '#/components/responses/Success' } } }
+    put: { tags: [Administration], operationId: updateProject, parameters: [{ $ref: '#/components/parameters/ID' }], requestBody: { $ref: '#/components/requestBodies/ResourceWrite' }, responses: { '200': { $ref: '#/components/responses/Success' } } }
+    delete: { tags: [Administration], operationId: deleteProject, parameters: [{ $ref: '#/components/parameters/ID' }], responses: { '204': { description: 삭제 완료 } } }
+  /incidents:
+    get: { tags: [Administration], operationId: listIncidents, responses: { '200': { $ref: '#/components/responses/List' } } }
+    post: { tags: [Administration], operationId: createIncident, requestBody: { $ref: '#/components/requestBodies/ResourceWrite' }, responses: { '201': { $ref: '#/components/responses/Success' } } }
+  /incidents/{id}:
+    get: { tags: [Administration], operationId: getIncident, parameters: [{ $ref: '#/components/parameters/ID' }], responses: { '200': { $ref: '#/components/responses/Success' } } }
+    put: { tags: [Administration], operationId: updateIncident, parameters: [{ $ref: '#/components/parameters/ID' }], requestBody: { $ref: '#/components/requestBodies/ResourceWrite' }, responses: { '200': { $ref: '#/components/responses/Success' } } }
+    delete: { tags: [Administration], operationId: deleteIncident, parameters: [{ $ref: '#/components/parameters/ID' }], responses: { '204': { description: 삭제 완료 } } }
+  /notifications:
+    get: { tags: [Administration], operationId: listNotifications, responses: { '200': { $ref: '#/components/responses/List' } } }
+    post: { tags: [Administration], operationId: createNotification, requestBody: { $ref: '#/components/requestBodies/ResourceWrite' }, responses: { '201': { $ref: '#/components/responses/Success' } } }
+  /notifications/{id}:
+    get: { tags: [Administration], operationId: getNotification, parameters: [{ $ref: '#/components/parameters/ID' }], responses: { '200': { $ref: '#/components/responses/Success' } } }
+    put: { tags: [Administration], operationId: updateNotification, parameters: [{ $ref: '#/components/parameters/ID' }], requestBody: { $ref: '#/components/requestBodies/ResourceWrite' }, responses: { '200': { $ref: '#/components/responses/Success' } } }
+    delete: { tags: [Administration], operationId: deleteNotification, parameters: [{ $ref: '#/components/parameters/ID' }], responses: { '204': { description: 삭제 완료 } } }
+  /costs:
+    get: { tags: [Administration], operationId: listCosts, responses: { '200': { $ref: '#/components/responses/List' } } }
+    post: { tags: [Administration], operationId: createCost, requestBody: { $ref: '#/components/requestBodies/ResourceWrite' }, responses: { '201': { $ref: '#/components/responses/Success' } } }
+  /costs/{id}:
+    get: { tags: [Administration], operationId: getCost, parameters: [{ $ref: '#/components/parameters/ID' }], responses: { '200': { $ref: '#/components/responses/Success' } } }
+    put: { tags: [Administration], operationId: updateCost, parameters: [{ $ref: '#/components/parameters/ID' }], requestBody: { $ref: '#/components/requestBodies/ResourceWrite' }, responses: { '200': { $ref: '#/components/responses/Success' } } }
+    delete: { tags: [Administration], operationId: deleteCost, parameters: [{ $ref: '#/components/parameters/ID' }], responses: { '204': { description: 삭제 완료 } } }
+  /mcp:
+    post:
+      tags: [AI]
+      operationId: mcpStreamableHTTP
+      description: /mcp의 /api/v1 별칭. initialize, ping, tools/list, tools/call 지원.
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '200':
+          description: JSON-RPC JSON 또는 SSE 응답
+          content:
+            application/json: { schema: { type: object, additionalProperties: true } }
+            text/event-stream: { schema: { type: string } }
+components:
+  securitySchemes:
+    sessionCookie: { type: apiKey, in: cookie, name: jupiq_session }
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT-or-jqk }
+  parameters:
+    ID: { name: id, in: path, required: true, schema: { type: integer, format: int64, minimum: 1 } }
+  requestBodies:
+    ApprovalReason:
+      required: false
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              reason: { type: string, description: workflow.require_reason=true이면 필수 }
+    RoleWrite:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [key, name, permissions]
+            properties:
+              key: { type: string }
+              name: { type: string }
+              description: { type: string }
+              permissions: { type: array, items: { type: string } }
+    ResourceWrite:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [name]
+            properties:
+              name: { type: string }
+              status: { type: string }
+              owner_user_id: { type: integer, format: int64 }
+              data: { type: object, additionalProperties: true }
+            additionalProperties: true
+  schemas:
+    HubWrite:
+      type: object
+      required: [name, base_url]
+      properties:
+        name: { type: string }
+        base_url: { type: string, format: uri }
+        network: { type: string }
+        enabled: { type: boolean }
+        verify_tls: { type: boolean, default: true }
+        collect_interval_seconds: { type: integer, minimum: 30, maximum: 86400 }
+        api_token: { type: string, writeOnly: true }
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            request_id: { type: string }
+    UserDetailPage:
+      type: object
+      required: [page, limit, total]
+      properties:
+        page: { type: integer, minimum: 1 }
+        limit: { type: integer, minimum: 1, maximum: 100 }
+        total: { type: integer, minimum: 0 }
+    UserServerMetadata:
+      type: object
+      required: [id, hub_id, hub_name, network, username, server_name, status, synced_at]
+      properties:
+        id: { type: integer, format: int64 }
+        hub_id: { type: integer, format: int64 }
+        hub_name: { type: string }
+        network: { type: string }
+        username: { type: string }
+        server_name: { type: string }
+        status: { type: string }
+        started_at: { type: [string, 'null'], format: date-time }
+        last_activity_at: { type: [string, 'null'], format: date-time }
+        url: { type: string }
+        node_name: { type: string }
+        pod_name: { type: string }
+        image: { type: string }
+        cpu_cores: { type: [number, 'null'] }
+        memory_bytes: { type: [integer, 'null'], format: int64 }
+        gpu_count: { type: [integer, 'null'] }
+        synced_at: { type: string, format: date-time }
+    UserUsagePeriod:
+      type: object
+      required: [from, to, sample_count, login_count, server_count, server_start_count, current_servers, runtime_seconds]
+      properties:
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        sample_count: { type: integer, format: int64 }
+        login_count: { type: integer, format: int64 }
+        server_count: { type: integer, format: int64 }
+        server_start_count: { type: integer, format: int64 }
+        current_servers: { type: integer, format: int64 }
+        runtime_seconds: { type: number }
+        cpu_average: { type: number }
+        cpu_peak: { type: number }
+        memory_average: { type: number }
+        memory_peak: { type: number }
+        gpu_average: { type: number }
+        gpu_peak: { type: number }
+        last_activity_at: { type: [string, 'null'], format: date-time }
+    UserDetail360:
+      type: object
+      required: [username, user, hubs, servers, timeline, usage, llm_usage, feature_enabled, data_policy]
+      properties:
+        username: { type: string }
+        user:
+          type: [object, 'null']
+          description: 중앙 서비스 계정. Hub에만 존재하면 null.
+          additionalProperties: true
+        hubs:
+          type: array
+          items:
+            type: object
+            required: [id, hub_id, hub_name, network, username, admin, active, synced_at]
+            properties:
+              id: { type: integer, format: int64 }
+              hub_id: { type: integer, format: int64 }
+              hub_name: { type: string }
+              network: { type: string }
+              hub_status: { type: string }
+              hub_version: { type: string }
+              username: { type: string }
+              display_name: { type: string }
+              department: { type: string }
+              admin: { type: boolean }
+              active: { type: boolean }
+              last_activity_at: { type: [string, 'null'], format: date-time }
+              synced_at: { type: string, format: date-time }
+        servers:
+          type: object
+          required: [current, current_total, history, meta]
+          properties:
+            current: { type: array, items: { $ref: '#/components/schemas/UserServerMetadata' } }
+            current_total: { type: integer, minimum: 0 }
+            history: { type: array, items: { $ref: '#/components/schemas/UserServerMetadata' } }
+            meta: { $ref: '#/components/schemas/UserDetailPage' }
+        timeline:
+          type: object
+          required: [items, meta]
+          properties:
+            items:
+              type: array
+              items:
+                type: object
+                required: [id, category, action, actor_username, resource_type, resource_id, result, occurred_at]
+                properties:
+                  id: { type: string }
+                  category: { type: string, enum: [audit, server, activity] }
+                  action: { type: string }
+                  actor_username: { type: string }
+                  resource_type: { type: string }
+                  resource_id: { type: string }
+                  hub_id: { type: integer, format: int64 }
+                  hub_name: { type: string }
+                  server_id: { type: integer, format: int64 }
+                  result: { type: string }
+                  reason: { type: string }
+                  occurred_at: { type: string, format: date-time }
+            meta: { $ref: '#/components/schemas/UserDetailPage' }
+        usage:
+          type: object
+          required: [day, week, month]
+          properties:
+            day: { $ref: '#/components/schemas/UserUsagePeriod' }
+            week: { $ref: '#/components/schemas/UserUsagePeriod' }
+            month: { $ref: '#/components/schemas/UserUsagePeriod' }
+        llm_usage:
+          type: object
+          description: 호출 수, 성공률, 지연, token, 비용의 메타데이터만 포함한다.
+          additionalProperties: true
+        feature_enabled:
+          type: object
+          properties:
+            gpu_monitoring: { type: boolean }
+            llm_usage_monitoring: { type: boolean }
+        data_policy:
+          type: object
+          required: [metadata_only, prompt_collected, code_collected]
+          properties:
+            metadata_only: { type: boolean, const: true }
+            prompt_collected: { type: boolean, const: false }
+            code_collected: { type: boolean, const: false }
+  responses:
+    Success:
+      description: 성공
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data]
+            properties: { data: {} }
+    List:
+      description: 목록 성공
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data, meta]
+            properties:
+              data: { type: array, items: {} }
+              meta:
+                type: object
+                properties:
+                  page: { type: integer }
+                  page_size: { type: integer }
+                  total: { type: integer }
+    Error:
+      description: 오류
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }

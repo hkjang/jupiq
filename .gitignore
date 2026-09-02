@@ -1,0 +1,12 @@
+.env
+dist/
+bin/
+web/dist/
+node_modules/
+web/node_modules/
+*.tar.gz
+coverage.out
+.DS_Store
+*.log
+.idea/
+.vscode/

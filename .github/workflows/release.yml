@@ -1,0 +1,100 @@
+name: 오프라인 이미지 릴리스
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: ${{ github.ref_name }} 빌드·검증·릴리스
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.26.7
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: 태그와 VERSION 일치 확인
+        id: version
+        shell: bash
+        run: |
+          version="$(tr -d '[:space:]' < VERSION)"
+          expected_tag="v${version}"
+          if [[ "${GITHUB_REF_NAME}" != "${expected_tag}" ]]; then
+            echo "태그 ${GITHUB_REF_NAME}와 VERSION ${version}이 일치하지 않습니다." >&2
+            exit 1
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "image=jupiq:${expected_tag}" >> "${GITHUB_OUTPUT}"
+          echo "archive=dist/jupiq-${expected_tag}.tar.gz" >> "${GITHUB_OUTPUT}"
+
+      - name: 소스 검사와 테스트
+        run: |
+          go mod verify
+          go vet ./...
+          go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+          govulncheck ./...
+          go test ./...
+          cd web
+          npm ci
+          npm run lint
+          npm test
+
+      - name: 서비스 이미지 빌드
+        run: ./scripts/build-image.sh "${{ steps.version.outputs.version }}"
+
+      - name: 오프라인 tar.gz 생성
+        run: ./scripts/package-offline.sh "${{ steps.version.outputs.version }}"
+
+      - name: 원본 이미지를 제거하고 tar.gz에서 복원
+        run: |
+          docker image rm "${{ steps.version.outputs.image }}"
+          ./scripts/verify-offline.sh "${{ steps.version.outputs.archive }}"
+
+      - name: 오프라인 내부망 기동 검증 준비
+        run: docker pull postgres:16-alpine
+
+      - name: 오프라인 내부망 기동 검증
+        run: ./scripts/offline-smoke-test.sh
+
+      - name: 단일 릴리스 자산 확인
+        shell: bash
+        run: |
+          mapfile -t assets < <(find dist -maxdepth 1 -type f -printf '%f\n')
+          if [[ "${#assets[@]}" -ne 1 || "${assets[0]}" != "jupiq-${GITHUB_REF_NAME}.tar.gz" ]]; then
+            printf '예상하지 않은 릴리스 자산: %s\n' "${assets[*]}" >&2
+            exit 1
+          fi
+
+      - name: GitHub Release 생성
+        uses: softprops/action-gh-release@v2
+        with:
+          name: jupiq ${{ github.ref_name }}
+          body: |
+            오프라인망 반입용 단일 Docker 이미지입니다.
+
+            ```bash
+            gzip -dc jupiq-${{ github.ref_name }}.tar.gz | docker load
+            docker image inspect jupiq:${{ github.ref_name }}
+            ```
+          files: ${{ steps.version.outputs.archive }}
+          fail_on_unmatched_files: true
+          generate_release_notes: true

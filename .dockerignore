@@ -1,0 +1,13 @@
+.git
+.github
+.env
+.gitignore
+node_modules
+web/node_modules
+web/dist
+docs
+dist
+bin
+*.tar.gz
+*.log
+coverage.out
