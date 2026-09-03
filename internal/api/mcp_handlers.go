@@ -46,7 +46,7 @@ func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {
 	response := rpcResponse{JSONRPC: "2.0", ID: request.ID}
 	switch request.Method {
 	case "initialize":
-		response.Result = map[string]any{"protocolVersion": "2025-03-26", "capabilities": map[string]any{"tools": map[string]any{"listChanged": false}}, "serverInfo": map[string]any{"name": "jupiq", "version": s.versionInfo().Version}, "instructions": "jupiq 운영 데이터를 조회합니다. 변경 작업은 권한과 승인 정책을 따릅니다."}
+		response.Result = map[string]any{"protocolVersion": "2025-03-26", "capabilities": map[string]any{"tools": map[string]any{"listChanged": false}}, "serverInfo": map[string]any{"name": "jupiq", "version": s.versionInfo().Version}, "instructions": "jupiq 운영 데이터를 최소 권한으로 조회하는 읽기 전용 MCP입니다."}
 	case "ping":
 		response.Result = map[string]any{}
 	case "tools/list":
@@ -161,14 +161,21 @@ func (s *Server) mcpToolCall(r *http.Request, raw json.RawMessage) (map[string]a
 		from := now.Add(-30 * 24 * time.Hour)
 		to := now
 		if value, ok := params.Arguments["from"].(string); ok {
-			if parsed, e := time.Parse(time.RFC3339, value); e == nil {
-				from = parsed
+			parsed, e := time.Parse(time.RFC3339, value)
+			if e != nil {
+				return nil, &toolError{"from은 RFC3339 날짜·시간이어야 합니다"}
 			}
+			from = parsed
 		}
 		if value, ok := params.Arguments["to"].(string); ok {
-			if parsed, e := time.Parse(time.RFC3339, value); e == nil {
-				to = parsed
+			parsed, e := time.Parse(time.RFC3339, value)
+			if e != nil {
+				return nil, &toolError{"to는 RFC3339 날짜·시간이어야 합니다"}
 			}
+			to = parsed
+		}
+		if !from.Before(to) || to.Sub(from) > 366*24*time.Hour {
+			return nil, &toolError{"조회 시작은 종료보다 앞서야 하며 기간은 최대 366일입니다"}
 		}
 		granularity, _ := params.Arguments["granularity"].(string)
 		groupBy, _ := params.Arguments["group_by"].(string)

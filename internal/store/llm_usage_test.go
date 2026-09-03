@@ -31,3 +31,22 @@ func TestLLMSafeLabelsExcludePromptAndCredentials(t *testing.T) {
 		}
 	}
 }
+
+func TestEmptyLLMSummaryKeepsStableResponseShape(t *testing.T) {
+	summary := summarizeLLMItems([]map[string]any{})
+	if summary["calls"] != int64(0) || summary["success_rate"] != nil {
+		t.Fatalf("unexpected empty summary: %#v", summary)
+	}
+	for _, key := range []string{"input_tokens", "output_tokens", "total_tokens", "estimated_cost", "latency_p95_ms"} {
+		if _, exists := summary[key]; !exists {
+			t.Fatalf("empty summary omitted stable field %q: %#v", key, summary)
+		}
+	}
+}
+
+func TestLLMSuccessRateUsesOnlyCallsWithStatusMetadata(t *testing.T) {
+	summary := summarizeLLMItems([]map[string]any{{"calls": int64(10), "success": int64(2), "errors": int64(1)}})
+	if summary["status_observed_calls"] != int64(3) || summary["success_rate"].(float64) != float64(2)/3 {
+		t.Fatalf("unknown status calls distorted success rate: %#v", summary)
+	}
+}

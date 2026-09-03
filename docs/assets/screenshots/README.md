@@ -4,7 +4,7 @@
 
 갤러리 최상단 우선순위:
 
-1. `realtime-usage.webp` — 실시간 사용자·서버·CPU/GPU 현황
+1. `realtime-usage.webp` — GPU 기능을 끈 실행 서버 사용자·서버·CPU/RAM 현황
 2. `data-freshness.webp` — 망별 마지막 수집 시각과 Fresh/Stale/Degraded
 3. `usage-drilldown.webp` — 일·주·월 통계와 사용자→망→세션 드릴다운
 

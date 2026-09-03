@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"sync"
 	"time"
@@ -59,32 +60,54 @@ func (c *Collector) collectHubs(ctx context.Context) {
 		go func() {
 			requestCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
 			defer cancel()
-			token, err := c.Store.HubToken(requestCtx, hub.ID)
+			currentHub, token, err := c.Store.GetHubCredential(requestCtx, hub.ID)
 			if err != nil {
-				_ = c.Store.UpdateHubHealth(requestCtx, hub.ID, false, "", err.Error(), nil)
+				c.Logger.Warn("hub credential read failed", "hub_id", hub.ID, "error", err)
 				return
 			}
-			client, err := integration.NewJupyterHub(hub.BaseURL, token, hub.VerifyTLS)
+			if !currentHub.Enabled {
+				return
+			}
+			client, err := integration.NewJupyterHub(currentHub.BaseURL, token, currentHub.VerifyTLS)
 			if err != nil {
-				_ = c.Store.UpdateHubHealth(requestCtx, hub.ID, false, "", err.Error(), nil)
+				c.updateHubHealth(ctx, currentHub, false, "", err.Error(), nil)
 				return
 			}
 			info, err := client.Info(requestCtx)
 			if err != nil {
-				_ = c.Store.UpdateHubHealth(requestCtx, hub.ID, false, "", err.Error(), nil)
+				c.updateHubHealth(ctx, currentHub, false, "", err.Error(), nil)
 				return
 			}
 			users, err := client.Users(requestCtx)
 			if err != nil {
-				_ = c.Store.UpdateHubHealth(requestCtx, hub.ID, false, info.Version, err.Error(), nil)
+				c.updateHubHealth(ctx, currentHub, false, info.Version, err.Error(), nil)
 				return
 			}
-			if err := c.Store.SyncHubUsers(requestCtx, hub, users); err != nil {
-				_ = c.Store.UpdateHubHealth(requestCtx, hub.ID, false, info.Version, err.Error(), nil)
+			stored, err := c.Store.SyncHubUsersIfCurrent(requestCtx, currentHub, users)
+			if err != nil {
+				c.updateHubHealth(ctx, currentHub, false, info.Version, err.Error(), nil)
 				return
 			}
-			_ = c.Store.UpdateHubHealth(requestCtx, hub.ID, true, info.Version, "", map[string]any{"users": len(users), "synced_at": time.Now().UTC()})
+			if !stored {
+				c.Logger.Debug("discarded stale hub snapshot", "hub_id", hub.ID)
+				return
+			}
+			c.updateHubHealth(ctx, currentHub, true, info.Version, "", map[string]any{"users": len(users), "synced_at": time.Now().UTC()})
 		}()
+	}
+}
+
+func (c *Collector) updateHubHealth(parent context.Context, hub store.Hub, success bool, version, message string, snapshot any) {
+	// Provider timeouts cancel requestCtx. Persist health through a separate,
+	// short-lived context so the exact timeout that caused degradation cannot
+	// also suppress the degraded status update.
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(parent), 5*time.Second)
+	defer cancel()
+	stored, err := c.Store.UpdateHubHealthIfCurrent(writeCtx, hub, success, version, message, snapshot)
+	if err != nil {
+		c.Logger.Warn("hub health update failed", "hub_id", hub.ID, "error", err)
+	} else if !stored {
+		c.Logger.Debug("discarded stale hub health", "hub_id", hub.ID)
 	}
 }
 
@@ -109,20 +132,21 @@ type prometheusConfig struct {
 
 func (c *Collector) collectPrometheus(ctx context.Context) {
 	var cfg prometheusConfig
-	if c.Store.GetSetting(ctx, "prometheus", &cfg) != nil || !cfg.Enabled || cfg.BaseURL == "" {
+	token, _, generation, err := c.Store.GetSettingAndSecretGeneration(ctx, "prometheus", "prometheus.token", &cfg)
+	if err != nil || !cfg.Enabled || cfg.BaseURL == "" {
 		return
 	}
-	if cfg.Queries == nil {
+	if len(cfg.Queries) == 0 {
 		cfg.Queries = map[string]string{
 			"cpu_cores":    `sum(rate(container_cpu_usage_seconds_total{pod=~"jupyter-.*"}[5m])) by (pod)`,
 			"memory_bytes": `sum(container_memory_working_set_bytes{pod=~"jupyter-.*"}) by (pod)`,
 		}
 	}
-	var features struct {
-		GPUMonitoring bool `json:"gpu_monitoring"`
-	}
-	_ = c.Store.GetSetting(ctx, "features", &features)
-	if features.GPUMonitoring {
+	gpuMonitoring := c.featureEnabled(ctx, "gpu_monitoring")
+	if gpuMonitoring {
+		if _, ok := cfg.Queries["gpu_count"]; !ok {
+			cfg.Queries["gpu_count"] = `count(DCGM_FI_DEV_GPU_UTIL{pod=~"jupyter-.*"}) by (pod)`
+		}
 		if _, ok := cfg.Queries["gpu_utilization"]; !ok {
 			cfg.Queries["gpu_utilization"] = `avg(DCGM_FI_DEV_GPU_UTIL) by (pod)`
 		}
@@ -130,14 +154,13 @@ func (c *Collector) collectPrometheus(ctx context.Context) {
 			cfg.Queries["vram_bytes"] = `sum(DCGM_FI_DEV_FB_USED * 1024 * 1024) by (pod)`
 		}
 	}
-	token, _ := c.Store.GetSecret(ctx, "prometheus.token")
 	client, err := integration.NewPrometheus(cfg.BaseURL, token, cfg.VerifyTLS)
 	if err != nil {
 		c.Logger.Warn("prometheus config invalid", "error", err)
 		return
 	}
 	for name, query := range cfg.Queries {
-		if !features.GPUMonitoring && (name == "gpu_utilization" || name == "vram_bytes" || name == "gpu_count") {
+		if store.IsGPUMetric(name, query) && !c.featureEnabled(ctx, "gpu_monitoring") {
 			continue
 		}
 		requestCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
@@ -147,8 +170,12 @@ func (c *Collector) collectPrometheus(ctx context.Context) {
 			c.Logger.Warn("prometheus query failed", "metric", name, "error", err)
 			continue
 		}
-		if err := c.Store.SaveMetricPoints(ctx, "prometheus", name, points); err != nil {
+		stored, err := c.Store.SavePrometheusMetricPointsIfCurrent(ctx, generation, name, query, points)
+		if err != nil {
 			c.Logger.Warn("save metric failed", "metric", name, "error", err)
+		} else if !stored {
+			c.Logger.Debug("discarded stale prometheus response", "metric", name)
+			break
 		}
 	}
 }
@@ -163,11 +190,15 @@ type kubernetesConfig struct {
 }
 
 func (c *Collector) collectKubernetes(ctx context.Context) {
+	settings, token, _, generation, err := c.Store.GetSettingsAndSecretGeneration(ctx, []string{"kubernetes", "llm_usage"}, "kubernetes.token")
 	var cfg kubernetesConfig
-	if c.Store.GetSetting(ctx, "kubernetes", &cfg) != nil || !cfg.Enabled || cfg.BaseURL == "" {
+	raw, exists := settings["kubernetes"]
+	if err == nil && (!exists || json.Unmarshal(raw, &cfg) != nil) {
+		err = store.ErrNotFound
+	}
+	if err != nil || !cfg.Enabled || cfg.BaseURL == "" {
 		return
 	}
-	token, _ := c.Store.GetSecret(ctx, "kubernetes.token")
 	client, err := integration.NewKubernetes(cfg.BaseURL, token, cfg.VerifyTLS)
 	if err != nil {
 		c.Logger.Warn("kubernetes config invalid", "error", err)
@@ -184,11 +215,16 @@ func (c *Collector) collectKubernetes(ctx context.Context) {
 		var llm struct {
 			PodUsernameRegex string `json:"pod_username_regex"`
 		}
-		_ = c.Store.GetSetting(ctx, "llm_usage", &llm)
+		_ = json.Unmarshal(settings["llm_usage"], &llm)
 		cfg.PodUsernameRegex = llm.PodUsernameRegex
 	}
-	if err := c.Store.UpdatePods(ctx, pods, cfg.PodUsernameRegex); err != nil {
+	writeCtx, writeCancel := context.WithTimeout(ctx, 20*time.Second)
+	defer writeCancel()
+	stored, err := c.Store.UpdatePodsIfCurrent(writeCtx, generation, pods, cfg.PodUsernameRegex)
+	if err != nil {
 		c.Logger.Warn("kubernetes pod save failed", "error", err)
+	} else if !stored {
+		c.Logger.Debug("discarded stale kubernetes response")
 	}
 }
 
@@ -203,21 +239,22 @@ type llmUsageConfig struct {
 }
 
 func (c *Collector) collectLLMUsage(ctx context.Context) {
-	var features struct {
-		Enabled bool `json:"llm_usage_monitoring"`
-	}
-	_ = c.Store.GetSetting(ctx, "features", &features)
-	if !features.Enabled {
+	if !c.featureEnabled(ctx, "llm_usage_monitoring") {
 		return
 	}
 	// The default query uses increase(...[1m]). Querying it on the 30-second
 	// base ticker would count overlapping windows twice, so LLM counters have
 	// their own non-overlapping one-minute cadence.
-	if !c.llmScanDue(time.Now()) {
+	scanAt := llmEvaluationTime(time.Now())
+	if !c.llmScanDue(scanAt) {
+		return
+	}
+	settings, token, _, generation, err := c.Store.GetSettingsAndSecretGeneration(ctx, []string{"llm_usage", "prometheus"}, "prometheus.token")
+	if err != nil {
 		return
 	}
 	var cfg llmUsageConfig
-	if c.Store.GetSetting(ctx, "llm_usage", &cfg) != nil || cfg.Source != "prometheus" {
+	if raw, ok := settings["llm_usage"]; !ok || json.Unmarshal(raw, &cfg) != nil || cfg.Source != "prometheus" {
 		return
 	}
 	if _, err := integration.CompilePodUsernamePattern(cfg.PodUsernameRegex); err != nil {
@@ -229,10 +266,9 @@ func (c *Collector) collectLLMUsage(ctx context.Context) {
 		return
 	}
 	var prom prometheusConfig
-	if c.Store.GetSetting(ctx, "prometheus", &prom) != nil || !prom.Enabled || prom.BaseURL == "" {
+	if raw, ok := settings["prometheus"]; !ok || json.Unmarshal(raw, &prom) != nil || !prom.Enabled || prom.BaseURL == "" {
 		return
 	}
-	token, _ := c.Store.GetSecret(ctx, "prometheus.token")
 	client, err := integration.NewPrometheus(prom.BaseURL, token, prom.VerifyTLS)
 	if err != nil {
 		return
@@ -242,16 +278,23 @@ func (c *Collector) collectLLMUsage(ctx context.Context) {
 		queries = map[string]string{"calls": `sum(increase(http_requests_total{path="/v1/chat/completions"}[1m])) by (pod,path,status,model,hub)`}
 	}
 	for name, query := range queries {
+		if !c.featureEnabled(ctx, "llm_usage_monitoring") {
+			break
+		}
 		requestCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		points, queryErr := client.Query(requestCtx, query, time.Now())
+		points, queryErr := client.Query(requestCtx, query, scanAt)
 		cancel()
 		if queryErr != nil {
 			c.Logger.Warn("llm usage query failed", "metric", name, "error", queryErr)
 			continue
 		}
 		points = normalizeLLMLabels(points, cfg.LabelMappings)
-		if err := c.Store.SaveLLMMetricPoints(ctx, name, cfg.PodUsernameRegex, cfg.PathMatcher, points); err != nil {
+		stored, err := c.Store.SaveLLMMetricPointsIfCurrent(ctx, generation, name, cfg.PodUsernameRegex, cfg.PathMatcher, points)
+		if err != nil {
 			c.Logger.Warn("llm usage save failed", "metric", name, "error", err)
+		} else if !stored {
+			c.Logger.Debug("discarded stale llm usage response", "metric", name)
+			break
 		}
 		costRate := float64(0)
 		if name == "input_tokens" {
@@ -265,11 +308,29 @@ func (c *Collector) collectLLMUsage(ctx context.Context) {
 				costPoints[index] = point
 				costPoints[index].Value = point.Value * costRate / 1_000_000
 			}
-			if err := c.Store.SaveLLMMetricPoints(ctx, "estimated_cost", cfg.PodUsernameRegex, cfg.PathMatcher, costPoints); err != nil {
+			stored, err := c.Store.SaveLLMMetricPointsIfCurrent(ctx, generation, "estimated_cost_"+name, cfg.PodUsernameRegex, cfg.PathMatcher, costPoints)
+			if err != nil {
 				c.Logger.Warn("llm usage cost save failed", "metric", name, "error", err)
+			} else if !stored {
+				c.Logger.Debug("discarded stale llm usage cost response", "metric", name)
+				break
 			}
 		}
 	}
+}
+
+func (c *Collector) featureEnabled(ctx context.Context, feature string) bool {
+	var features map[string]json.RawMessage
+	if c.Store.GetSetting(ctx, "features", &features) != nil {
+		return false
+	}
+	var enabled bool
+	raw, exists := features[feature]
+	return exists && json.Unmarshal(raw, &enabled) == nil && enabled
+}
+
+func llmEvaluationTime(now time.Time) time.Time {
+	return now.UTC().Truncate(time.Minute)
 }
 
 func (c *Collector) llmScanDue(now time.Time) bool {

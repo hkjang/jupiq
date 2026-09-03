@@ -38,16 +38,18 @@ type oidcState struct {
 }
 
 func (s *Service) OIDCConfig(ctx context.Context) (OIDCConfig, bool, error) {
+	cfg, _, configured, err := s.oidcConfigAndSecret(ctx)
+	return cfg, configured, err
+}
+
+func (s *Service) oidcConfigAndSecret(ctx context.Context) (OIDCConfig, string, bool, error) {
 	var cfg OIDCConfig
-	if err := s.Store.GetSetting(ctx, "auth.oidc", &cfg); err != nil {
-		return cfg, false, err
-	}
-	_, err := s.Store.GetSecret(ctx, "oidc.client_secret")
-	return cfg, !store.IsNotFound(err), nil
+	secret, configured, err := s.Store.GetSettingAndSecret(ctx, "auth.oidc", "oidc.client_secret", &cfg)
+	return cfg, secret, configured, err
 }
 
 func (s *Service) OIDCLogin(ctx context.Context, redirectOverride string) (string, string, time.Time, error) {
-	cfg, configured, err := s.OIDCConfig(ctx)
+	cfg, secret, configured, err := s.oidcConfigAndSecret(ctx)
 	if err != nil || !cfg.Enabled || !configured || cfg.IssuerURL == "" || cfg.ClientID == "" {
 		return "", "", time.Time{}, errors.New("OIDC 로그인이 설정되지 않았습니다")
 	}
@@ -59,10 +61,6 @@ func (s *Service) OIDCLogin(ctx context.Context, redirectOverride string) (strin
 	}
 	if _, err := url.ParseRequestURI(cfg.RedirectURL); err != nil {
 		return "", "", time.Time{}, errors.New("OIDC redirect URL이 올바르지 않습니다")
-	}
-	secret, err := s.Store.GetSecret(ctx, "oidc.client_secret")
-	if err != nil {
-		return "", "", time.Time{}, err
 	}
 	providerCtx := oidc.ClientContext(ctx, integration.SafeHTTPClient(cfg.VerifyTLS, 10*time.Second))
 	provider, err := oidc.NewProvider(providerCtx, cfg.IssuerURL)
@@ -98,18 +96,17 @@ func (s *Service) OIDCCallback(ctx context.Context, code, state, stateCookie, re
 	if json.Unmarshal([]byte(plain), &saved) != nil || saved.State != state || time.Now().After(saved.ExpiresAt) {
 		return store.User{}, errors.New("OIDC state가 만료되었거나 일치하지 않습니다")
 	}
-	cfg, _, err := s.OIDCConfig(ctx)
+	cfg, secret, configured, err := s.oidcConfigAndSecret(ctx)
 	if err != nil {
 		return store.User{}, err
+	}
+	if !cfg.Enabled || !configured {
+		return store.User{}, errors.New("OIDC 로그인이 비활성화되었습니다")
 	}
 	if cfg.RedirectURL == "" {
 		cfg.RedirectURL = redirectOverride
 	}
 	if _, err := integration.ValidateEndpoint(cfg.IssuerURL); err != nil {
-		return store.User{}, err
-	}
-	secret, err := s.Store.GetSecret(ctx, "oidc.client_secret")
-	if err != nil {
 		return store.User{}, err
 	}
 	providerCtx := oidc.ClientContext(ctx, integration.SafeHTTPClient(cfg.VerifyTLS, 10*time.Second))

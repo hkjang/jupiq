@@ -18,8 +18,8 @@ import { ChartCard } from '../components/ChartCard'
 import { PageHeader } from '../components/PageHeader'
 import { useLiveDashboard, type DashboardFilters } from '../hooks/useLiveDashboard'
 import type { ApiRecord } from '../types'
-import { asNumber, asText, formatBytes, formatDate, formatDuration, formatPercent, pick, statusTone } from '../utils/format'
-import { filterLiveUsers, formatCpuResource, formatMemoryResource, summarizeLiveUsers } from '../utils/dashboard'
+import { asNumber, asText, formatBytes, formatDate, formatDuration, pick, statusTone } from '../utils/format'
+import { filterLiveUsers, formatCpuResource, formatGpuResource, formatMemoryResource, formatVramResource, isFreshLiveSession, summarizeLiveUsers } from '../utils/dashboard'
 
 function records(value: unknown): ApiRecord[] {
   return Array.isArray(value) ? value.filter((item): item is ApiRecord => Boolean(item) && typeof item === 'object') : []
@@ -44,8 +44,35 @@ function statisticValue(value: unknown): string | number | undefined {
   return typeof value === 'string' || typeof value === 'number' ? value : asText(value)
 }
 
+function liveSessionKey(row: ApiRecord) {
+  const serverID = pick(row, 'server_id', 'id')
+  if (serverID !== undefined && serverID !== null && String(serverID) !== '') return `server:${String(serverID)}`
+  return [pick(row, 'hub_id', 'hub', 'hub_name'), pick(row, 'username', 'user_name'), pick(row, 'server_name', 'name')]
+    .map((value) => asText(value, '-'))
+    .join('::')
+}
+
+function freshnessTime(value: unknown) {
+  return value === undefined || value === null || value === '' ? '기준 시각 없음' : formatDate(value)
+}
+
+function freshnessStatus(row: ApiRecord) {
+  const sessionAt = pick(row, 'data_freshness', 'sampled_at', 'synced_at')
+  const resourceAt = pick(row, 'resource_sampled_at', 'metric_sampled_at')
+  const sessionStale = row.stale === true
+  const resourceStale = row.resource_stale === true
+  return (
+    <Space direction="vertical" size={2}>
+      <Space size={4} wrap><Tag color={sessionStale ? 'warning' : 'success'}>{sessionStale ? 'Hub 스냅샷 오래됨' : 'Hub 스냅샷 최신'}</Tag><Typography.Text type="secondary">{freshnessTime(sessionAt)}</Typography.Text></Space>
+      <Space size={4} wrap><Tag color={resourceStale ? 'warning' : resourceAt ? 'success' : 'default'}>{resourceStale ? '자원 지표 오래됨' : resourceAt ? '자원 지표 최신' : '자원 기준 시각 없음'}</Tag>{Boolean(resourceAt) && <Typography.Text type="secondary">{freshnessTime(resourceAt)}</Typography.Text>}</Space>
+    </Space>
+  )
+}
+
 export function DashboardPage() {
-  const { features } = useAuth()
+  const { features, hasGlobalPermission } = useAuth()
+  const canReadUsage = hasGlobalPermission('usage:read')
+  const canViewUserDetails = hasGlobalPermission('users:read')
   const navigate = useNavigate()
   const [filters, setFilters] = useState<DashboardFilters>({ range: 'day' })
   const { data, loading, error, connection, lastUpdated, stale, transportStale, sourceStale, reload } = useLiveDashboard(filters)
@@ -63,8 +90,9 @@ export function DashboardPage() {
   const aggregateAll = nestedRecord(aggregates.all)
   const dimensionFilterActive = Boolean(filters.network || filters.hub || filters.department || filters.project)
   const displayedLiveUsers = useMemo(() => filterLiveUsers(liveUsers, filters), [data, filters.network, filters.hub, filters.department, filters.project]) // eslint-disable-line react-hooks/exhaustive-deps
+  const freshDisplayedSessions = useMemo(() => displayedLiveUsers.filter(isFreshLiveSession), [displayedLiveUsers])
   const localSummary: ApiRecord = dimensionFilterActive ? summarizeLiveUsers(displayedLiveUsers) : {}
-  const summary = dimensionFilterActive ? { ...rawSummary, ...localSummary } : rawSummary
+  const summary = dimensionFilterActive ? localSummary : rawSummary
 
   const options = useMemo(() => ({
     network: records(providedFilters.networks).length
@@ -76,15 +104,15 @@ export function DashboardPage() {
   }), [data]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const cpuPercent = metric(summary, 'cpu_utilization', 'cpu_percent')
-  const cpuCores = metric(summary, 'cpu_cores', 'cpu_usage') ?? aggregateAll.cpu_cores
+  const cpuCores = metric(summary, 'cpu_cores', 'cpu_usage') ?? (dimensionFilterActive ? undefined : aggregateAll.cpu_cores)
   const memoryPercent = metric(summary, 'memory_utilization', 'memory_percent')
-  const memoryBytes = metric(summary, 'memory_bytes', 'memory_usage') ?? aggregateAll.memory_bytes
+  const memoryBytes = metric(summary, 'memory_bytes', 'memory_usage') ?? (dimensionFilterActive ? undefined : aggregateAll.memory_bytes)
   const gpuPercent = metric(summary, 'gpu_utilization', 'gpu_percent')
-  const gpuCount = metric(summary, 'gpu_count', 'gpu_usage') ?? aggregateAll.gpu_count
+  const gpuCount = metric(summary, 'gpu_count', 'gpu_usage') ?? (dimensionFilterActive ? undefined : aggregateAll.gpu_count)
   const vramPercent = metric(summary, 'vram_utilization', 'vram_percent')
-  const vramBytes = metric(summary, 'vram_bytes', 'vram_usage') ?? aggregateAll.vram_bytes
+  const vramBytes = metric(summary, 'vram_bytes', 'vram_usage') ?? (dimensionFilterActive ? undefined : aggregateAll.vram_bytes)
   const kpis = [
-    { key: 'users', title: '현재 접속자', value: metric(summary, 'active_users', 'online_users', 'current_users'), suffix: '명', icon: <TeamOutlined />, tone: 'blue' },
+    { key: 'users', title: '실행 중 사용자', value: metric(summary, 'active_users', 'online_users', 'current_users'), suffix: '명', icon: <TeamOutlined />, tone: 'blue' },
     { key: 'servers', title: '실행 서버', value: metric(summary, 'running_servers', 'active_servers', 'servers'), suffix: '대', icon: <CloudServerOutlined />, tone: 'cyan' },
     { key: 'cpu', title: cpuPercent !== undefined ? 'CPU 사용률' : 'CPU 사용량', value: cpuPercent ?? cpuCores, suffix: cpuPercent !== undefined ? '%' : ' Core', icon: <DashboardOutlined />, tone: 'geekblue', progress: cpuPercent !== undefined },
     { key: 'memory', title: memoryPercent !== undefined ? 'RAM 사용률' : 'RAM 사용량', value: memoryPercent !== undefined ? asNumber(memoryPercent) : memoryBytes !== undefined ? formatBytes(memoryBytes) : undefined, suffix: memoryPercent !== undefined ? '%' : undefined, icon: <DatabaseOutlined />, tone: 'purple', progress: memoryPercent !== undefined },
@@ -94,23 +122,30 @@ export function DashboardPage() {
     ] : []),
     { key: 'idle', title: 'Idle 세션', value: metric(summary, 'idle_sessions', 'idle_servers'), suffix: '건', icon: <ClockCircleOutlined />, tone: 'gold' },
     { key: 'long', title: '장시간 세션', value: metric(summary, 'long_running_sessions', 'long_sessions'), suffix: '건', icon: <WarningOutlined />, tone: 'red' },
-    { key: 'dau', title: '전체 일간 이용자', value: metric(usageStats, 'dau'), suffix: '명', icon: <TeamOutlined />, tone: 'blue' },
-    { key: 'wau', title: '전체 주간 이용자', value: metric(usageStats, 'wau'), suffix: '명', icon: <TeamOutlined />, tone: 'cyan' },
-    { key: 'mau', title: '전체 월간 이용자', value: metric(usageStats, 'mau'), suffix: '명', icon: <TeamOutlined />, tone: 'purple' },
+    ...(canReadUsage ? [
+      { key: 'dau', title: '전체 일간 이용자', value: metric(usageStats, 'dau'), suffix: '명', icon: <TeamOutlined />, tone: 'blue' },
+      { key: 'wau', title: '전체 주간 이용자', value: metric(usageStats, 'wau'), suffix: '명', icon: <TeamOutlined />, tone: 'cyan' },
+      { key: 'mau', title: '전체 월간 이용자', value: metric(usageStats, 'mau'), suffix: '명', icon: <TeamOutlined />, tone: 'purple' },
+    ] : []),
   ]
 
   const userColumns: TableColumnsType<ApiRecord> = [
-    { title: '사용자', key: 'user', fixed: 'left', width: 150, render: (_value, row) => <button className="text-link" onClick={() => navigate(`/users/${encodeURIComponent(asText(pick(row, 'username', 'user_name', 'name'), ''))}`)}>{asText(pick(row, 'display_name', 'name', 'username', 'user_name'))}</button> },
+    { title: '사용자', key: 'user', fixed: 'left', width: 150, render: (_value, row) => {
+      const label = asText(pick(row, 'display_name', 'name', 'username', 'user_name'))
+      const username = asText(pick(row, 'username', 'user_name', 'name'), '')
+      return canViewUserDetails && username ? <button className="text-link" onClick={() => navigate(`/users/${encodeURIComponent(username)}`)}>{label}</button> : label
+    } },
     { title: '망 / Hub', key: 'hub', width: 180, render: (_value, row) => <Space direction="vertical" size={0}><span>{asText(pick(row, 'network', 'network_name'))}</span><Typography.Text type="secondary">{asText(pick(row, 'hub_name', 'hub'))}</Typography.Text></Space> },
     { title: '부서 / 프로젝트', key: 'org', width: 180, render: (_value, row) => <Space direction="vertical" size={0}><span>{asText(pick(row, 'department', 'department_name'))}</span><Typography.Text type="secondary">{asText(pick(row, 'project_name', 'project'))}</Typography.Text></Space> },
     { title: '실행시간', key: 'runtime', width: 120, render: (_value, row) => row.runtime_seconds !== undefined ? formatDuration(row.runtime_seconds) : asText(pick(row, 'runtime', 'running_time', 'server_runtime')) },
     { title: 'CPU', key: 'cpu', width: 110, render: (_value, row) => formatCpuResource(row) },
     { title: 'RAM', key: 'memory', width: 120, render: (_value, row) => formatMemoryResource(row) },
     ...(features.gpuMonitoring ? [
-      { title: 'GPU', key: 'gpu', width: 110, render: (_value: unknown, row: ApiRecord) => pick(row, 'gpu_percent', 'gpu_utilization') !== undefined ? formatPercent(pick(row, 'gpu_percent', 'gpu_utilization')) : `${asNumber(pick(row, 'gpu_count', 'gpu'))}장` },
-      { title: 'VRAM', key: 'vram', width: 120, render: (_value: unknown, row: ApiRecord) => pick(row, 'vram_percent', 'vram_utilization') !== undefined ? formatPercent(pick(row, 'vram_percent', 'vram_utilization')) : formatBytes(pick(row, 'vram_bytes', 'vram')) },
+      { title: 'GPU', key: 'gpu', width: 110, render: (_value: unknown, row: ApiRecord) => formatGpuResource(row) },
+      { title: 'VRAM', key: 'vram', width: 120, render: (_value: unknown, row: ApiRecord) => formatVramResource(row) },
     ] : []),
-    { title: '상태', key: 'status', width: 100, render: (_value, row) => <Tag color={statusTone(pick(row, 'status', 'server_status'))}>{asText(pick(row, 'status', 'server_status'))}</Tag> },
+    { title: '수집 최신성 / 기준 시각', key: 'freshness', width: 290, render: (_value, row) => freshnessStatus(row) },
+    { title: '서버 상태', key: 'status', width: 100, render: (_value, row) => <Tag color={statusTone(pick(row, 'status', 'server_status'))}>{asText(pick(row, 'status', 'server_status'))}</Tag> },
   ]
 
   const trendOption: EChartsOption = {
@@ -173,15 +208,21 @@ export function DashboardPage() {
             </Col>
           ))}
         </Row>
-        {hubs.length > 0 && <section className="hub-strip" aria-label="Hub 상태"><Row gutter={[12, 12]}>{hubs.map((hub) => <Col xs={24} sm={12} xl={6} key={asText(pick(hub, 'id', 'name'))}><Card size="small" hoverable onClick={() => navigate(`/hubs?search=${encodeURIComponent(asText(pick(hub, 'name'), ''))}`)}><Flex justify="space-between"><strong>{asText(pick(hub, 'name'))}</strong><Tag color={statusTone(pick(hub, 'status'))}>{asText(pick(hub, 'status'))}</Tag></Flex><Typography.Text type="secondary">접속 {asText(pick(hub, 'active_users', 'users'), '0')}명 · 서버 {asText(pick(hub, 'running_servers', 'servers'), '0')}대</Typography.Text></Card></Col>)}</Row></section>}
+        {hubs.length > 0 && <section className="hub-strip" aria-label="Hub 상태"><Row gutter={[12, 12]}>{hubs.map((hub) => <Col xs={24} sm={12} xl={6} key={asText(pick(hub, 'id', 'name'))}>
+          <Card size="small" hoverable onClick={() => navigate(`/hubs?search=${encodeURIComponent(asText(pick(hub, 'name'), ''))}`)}>
+            <Flex justify="space-between" gap={8}><strong>{asText(pick(hub, 'name'))}</strong><Space size={4} wrap><Tag color={statusTone(pick(hub, 'status'))}>{hub.enabled === false ? '사용 안 함' : asText(pick(hub, 'status'))}</Tag>{hub.enabled === false ? <Tag>수집 안 함</Tag> : <Tag color={hub.stale === true ? 'warning' : 'success'}>{hub.stale === true ? '오래됨' : '최신'}</Tag>}</Space></Flex>
+            <Typography.Text type="secondary">사용자 {asText(pick(hub, 'active_users', 'users'), '0')}명 · 서버 {asText(pick(hub, 'running_servers', 'servers'), '0')}대</Typography.Text><br />
+            <Typography.Text type="secondary">마지막 통신 {freshnessTime(pick(hub, 'last_success_at', 'last_seen_at'))}</Typography.Text>
+          </Card>
+        </Col>)}</Row></section>}
         <section className="dashboard-section">
-          <Flex justify="space-between" align="end" wrap gap={8}><div><Typography.Title level={3}>실시간 사용자 현황</Typography.Title><Typography.Paragraph type="secondary">누가 어느 환경에서 얼마나 자원을 사용 중인지 확인합니다.</Typography.Paragraph></div><Tag>{displayedLiveUsers.length}명</Tag></Flex>
-          {displayedLiveUsers.length ? <Table<ApiRecord> size="middle" rowKey={(row) => asText(pick(row, 'id', 'username', 'name'))} columns={userColumns} dataSource={displayedLiveUsers} pagination={{ pageSize: 10 }} scroll={{ x: 1050 }} /> : <Alert type="info" showIcon message={dimensionFilterActive ? '선택한 조건에 해당하는 실시간 사용자가 없습니다.' : '현재 수집된 실시간 사용자 정보가 없습니다.'} />}
+          <Flex justify="space-between" align="end" wrap gap={8}><div><Typography.Title level={3}>실행 중 사용자 현황</Typography.Title><Typography.Paragraph type="secondary">오래된 Hub 스냅샷은 진단을 위해 표에 유지하되 상단 KPI 집계에서는 제외합니다.</Typography.Paragraph></div><Space wrap><Tag>표시 {displayedLiveUsers.length}개</Tag><Tag color="success">KPI 반영 {freshDisplayedSessions.length}개</Tag></Space></Flex>
+          {displayedLiveUsers.length ? <Table<ApiRecord> size="middle" rowKey={liveSessionKey} columns={userColumns} dataSource={displayedLiveUsers} pagination={{ pageSize: 10 }} scroll={{ x: 1340 }} /> : <Alert type="info" showIcon message={dimensionFilterActive ? '선택한 조건에 해당하는 실행 중 사용자가 없습니다.' : '현재 수집된 실행 중 사용자 정보가 없습니다.'} />}
         </section>
         <div className="chart-grid">
           <ChartCard title="이용 추세" subtitle="로그인·서버 시작·CPU Core 변화" option={trendOption} empty={!trend.length} />
-          <ChartCard title="Top 사용자" subtitle="사용시간 기준 · 막대를 누르면 상세 조회" option={topOption} empty={!topUsers.length} onEvents={{ click: (params) => params.name && navigate(`/users/${encodeURIComponent(params.name)}`) }} />
-          {features.gpuMonitoring && <ChartCard title="GPU 낭비 후보" subtitle="할당 대비 실사용이 낮은 사용자" option={wasteOption} empty={!gpuWaste.length} onEvents={{ click: (params) => params.name && navigate(`/users/${encodeURIComponent(params.name)}`) }} extra={<FireOutlined className="warning-icon" />} />}
+          <ChartCard title="Top 사용자" subtitle={canViewUserDetails ? '사용시간 기준 · 막대를 누르면 상세 조회' : '사용시간 기준'} option={topOption} empty={!topUsers.length} onEvents={canViewUserDetails ? { click: (params) => params.name && navigate(`/users/${encodeURIComponent(params.name)}`) } : undefined} />
+          {features.gpuMonitoring && <ChartCard title="GPU 낭비 후보" subtitle="할당 대비 실사용이 낮은 사용자" option={wasteOption} empty={!gpuWaste.length} onEvents={canViewUserDetails ? { click: (params) => params.name && navigate(`/users/${encodeURIComponent(params.name)}`) } : undefined} extra={<FireOutlined className="warning-icon" />} />}
         </div>
       </AsyncState>
     </>

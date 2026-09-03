@@ -18,10 +18,15 @@ import (
 )
 
 var (
-	ErrNotFound         = errors.New("not found")
-	ErrIdentityConflict = errors.New("identity conflicts with an existing username")
-	ErrInvalidPassword  = errors.New("invalid current password")
-	ErrLocalAuthOnly    = errors.New("password change is only available for local accounts")
+	ErrNotFound             = errors.New("not found")
+	ErrIdentityConflict     = errors.New("identity conflicts with an existing username")
+	ErrInvalidPassword      = errors.New("invalid current password")
+	ErrLocalAuthOnly        = errors.New("password change is only available for local accounts")
+	ErrLastSuperAdmin       = errors.New("at least one active super administrator must remain")
+	ErrImmutableRole        = errors.New("the super_admin wildcard permission is immutable")
+	ErrScopeRequired        = errors.New("scope-aware role bindings are required")
+	ErrHubCredentialChanged = errors.New("hub credential generation changed")
+	ErrRoleGrantCeiling     = errors.New("role mutation exceeds the actor's current global permission ceiling")
 )
 
 type Store struct {
@@ -58,7 +63,26 @@ func Open(ctx context.Context, dsn string, cipher *secure.Cipher) (*Store, error
 func (s *Store) Close() { s.Pool.Close() }
 
 func (s *Store) Migrate(ctx context.Context) error {
-	if _, err := s.Pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`); err != nil {
+	// PostgreSQL's IF NOT EXISTS does not make concurrent DDL race-free. Keep
+	// every migration operation on one locked session so multiple jupiq replicas
+	// can start against a new database without racing on pg_type/schema objects.
+	conn, err := s.Pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire migration connection: %w", err)
+	}
+	const migrationLockKey int64 = 0x6a75706971 // "jupiq"
+	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, migrationLockKey); err != nil {
+		conn.Release()
+		return fmt.Errorf("acquire migration lock: %w", err)
+	}
+	defer func() {
+		unlockCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, _ = conn.Exec(unlockCtx, `SELECT pg_advisory_unlock($1)`, migrationLockKey)
+		conn.Release()
+	}()
+
+	if _, err := conn.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`); err != nil {
 		return fmt.Errorf("initialize migrations: %w", err)
 	}
 	entries, err := fs.Glob(migrations.FS, "*.sql")
@@ -68,7 +92,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 	sort.Strings(entries)
 	for _, name := range entries {
 		var applied bool
-		err := s.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE name=$1)`, name).Scan(&applied)
+		err := conn.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE name=$1)`, name).Scan(&applied)
 		if err != nil {
 			return err
 		}
@@ -79,7 +103,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		tx, err := s.Pool.Begin(ctx)
+		tx, err := conn.Begin(ctx)
 		if err != nil {
 			return err
 		}
@@ -112,38 +136,43 @@ func (s *Store) Seed(ctx context.Context, username, password string) error {
 		INSERT INTO users(username, display_name, password_hash, auth_source)
 		VALUES($1,$1,$2,'local')
 		ON CONFLICT (lower(username)) DO UPDATE SET username=EXCLUDED.username
+			WHERE users.auth_source='local'
 		RETURNING id`, username, string(hash)).Scan(&userID)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errors.New("bootstrap administrator username belongs to a non-local identity")
+		}
 		return fmt.Errorf("seed bootstrap administrator: %w", err)
 	}
 	permissions, _ := json.Marshal([]string{"*"})
 	var roleID int64
-	err = tx.QueryRow(ctx, `
+	if _, err := tx.Exec(ctx, `
 		INSERT INTO roles(role_key,name,description,permissions,system)
 		VALUES('super_admin','최고 관리자','모든 관리 권한',$1,true)
-		ON CONFLICT(role_key) DO UPDATE SET permissions=EXCLUDED.permissions, updated_at=now()
-		RETURNING id`, permissions).Scan(&roleID)
-	if err != nil {
+		ON CONFLICT(role_key) DO UPDATE SET permissions=EXCLUDED.permissions,system=true,updated_at=now()`, permissions); err != nil {
+		return err
+	}
+	if err := tx.QueryRow(ctx, `SELECT id FROM roles WHERE role_key='super_admin'`).Scan(&roleID); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO user_roles(user_id,role_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, userID, roleID); err != nil {
 		return err
 	}
-	userPermissions, _ := json.Marshal([]string{"profile:read", "profile:keys", "dashboard:read"})
+	userPermissions, _ := json.Marshal(defaultUserRolePermissions())
 	if _, err := tx.Exec(ctx, `INSERT INTO roles(role_key,name,description,permissions,system) VALUES('user','사용자','개인화 및 본인 사용량 조회',$1,true) ON CONFLICT(role_key) DO NOTHING`, userPermissions); err != nil {
 		return err
 	}
 	defaults := map[string]any{
-		"system":        map[string]any{"locale": "ko-KR", "timezone": "Asia/Seoul", "service_name": "jupiq", "raw_retention_days": 30, "page_size": 20},
+		"system":        map[string]any{"raw_retention_days": 30},
 		"workflow":      map[string]any{"approval_enabled": false, "manager_review_enabled": false, "require_reason": false, "request_types": []string{}},
 		"auth.oidc":     map[string]any{"enabled": false, "issuer_url": "", "client_id": "", "redirect_url": "", "scopes": []string{"openid", "profile", "email"}, "username_claim": "preferred_username", "auto_create_users": true, "verify_tls": true},
-		"ai":            map[string]any{"enabled": false, "provider": "openai-compatible", "base_url": "", "model": "", "max_tokens": 4096},
+		"ai":            map[string]any{"enabled": false, "provider": "openai-compatible", "base_url": "", "model": "", "max_tokens": 4096, "streaming": true, "verify_tls": true},
 		"prometheus":    map[string]any{"enabled": false, "base_url": "", "verify_tls": true},
 		"kubernetes":    map[string]any{"enabled": false, "base_url": "", "verify_tls": true},
-		"notifications": map[string]any{"portal_enabled": true, "email_enabled": false, "webhook_enabled": false},
+		"notifications": map[string]any{"webhook_enabled": false, "base_url": "", "events": []string{}},
 		"features":      map[string]any{"gpu_monitoring": false, "llm_usage_monitoring": false},
 		"llm_usage":     map[string]any{"source": "prometheus", "pod_username_regex": "^jupyter-(?P<username>[a-zA-Z0-9._-]+)", "path_matcher": "/v1/chat/completions", "label_mappings": map[string]string{}, "promql": map[string]string{"calls": "sum(increase(http_requests_total{path=\"/v1/chat/completions\"}[1m])) by (pod,path,status,model,hub)"}, "input_cost_per_million": 0, "output_cost_per_million": 0, "stale_seconds": 300, "retention_days": 30},
-		"security":      map[string]any{"key_rotation_days": 90, "key_max_lifetime_days": 365, "key_permissions": []string{}, "break_glass_enabled": false, "dangerous_action_reason": true},
+		"security":      map[string]any{"key_rotation_days": 90, "key_max_lifetime_days": 365, "key_permissions": []string{}},
 	}
 	for key, value := range defaults {
 		blob, _ := json.Marshal(value)
@@ -152,6 +181,10 @@ func (s *Store) Seed(ctx context.Context, username, password string) error {
 		}
 	}
 	return tx.Commit(ctx)
+}
+
+func defaultUserRolePermissions() []string {
+	return []string{"profile:read", "profile:keys"}
 }
 
 func (s *Store) Ping(ctx context.Context) error { return s.Pool.Ping(ctx) }

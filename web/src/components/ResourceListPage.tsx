@@ -1,8 +1,12 @@
-import { DeleteOutlined, EditOutlined, MoreOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons'
+import { ApiOutlined, DeleteOutlined, EditOutlined, MoreOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons'
 import {
+  Alert,
   App,
   Button,
+  Card,
+  Drawer,
   Dropdown,
+  Flex,
   Form,
   Input,
   InputNumber,
@@ -17,11 +21,14 @@ import {
   type MenuProps,
   type TableColumnsType,
 } from 'antd'
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useDeferredValue, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { jsonBody, request } from '../api/client'
+import { useAuth } from '../auth/AuthContext'
 import { useList } from '../hooks/useList'
 import type { ApiRecord } from '../types'
 import { asNumber, asText, formatBytes, formatDate, formatPercent, pick, statusTone } from '../utils/format'
+import { hasPermissionForTargetMode } from '../utils/permissions'
 import { AsyncState } from './AsyncState'
 import { PageHeader } from './PageHeader'
 
@@ -58,6 +65,12 @@ export interface RowAction {
   confirm?: string
   body?: (record: ApiRecord) => unknown
   visible?: (record: ApiRecord) => boolean
+  permission?: string
+}
+
+export interface ResourceEditorTest {
+  label?: string
+  run: (values: ApiRecord, editing: ApiRecord | null) => Promise<ApiRecord & { success: boolean }>
 }
 
 interface Props {
@@ -70,6 +83,11 @@ interface Props {
   fields?: ResourceField[]
   createLabel?: string
   dataNote?: ReactNode
+  writePermission?: string
+  scopeAwareWrite?: boolean
+  globalCreate?: boolean
+  editorVariant?: 'modal' | 'drawer'
+  editorTest?: ResourceEditorTest
 }
 
 const statusLabels: Record<string, string> = {
@@ -103,15 +121,36 @@ function rowId(record: ApiRecord) {
   return String(pick(record, 'id', 'key', 'uuid', 'name') || '')
 }
 
-export function ResourceListPage({ title, description, endpoint, columns, emptyDescription, rowActions = [], fields, createLabel = '새 항목 등록', dataNote }: Props) {
+export function ResourceListPage({ title, description, endpoint, columns, emptyDescription, rowActions = [], fields, createLabel = '새 항목 등록', dataNote, writePermission, scopeAwareWrite = false, globalCreate = false, editorVariant = 'modal', editorTest }: Props) {
   const { message, modal } = App.useApp()
-  const { data, meta, loading, error, reload } = useList<ApiRecord>(endpoint)
-  const [query, setQuery] = useState(() => new URLSearchParams(window.location.search).get('search') || '')
+  const { user, hasGlobalPermission } = useAuth()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const queryParam = searchParams.get('search') || ''
+  const [query, setQuery] = useState(() => queryParam)
+  const deferredQuery = useDeferredValue(query.trim())
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
+  const listPath = useMemo(() => {
+    const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) })
+    if (deferredQuery) params.set('search', deferredQuery)
+    return `${endpoint}?${params.toString()}`
+  }, [endpoint, page, pageSize, deferredQuery])
+  const { data, meta, loading, error, reload } = useList<ApiRecord>(listPath)
   const [editorOpen, setEditorOpen] = useState(false)
   const [editing, setEditing] = useState<ApiRecord | null>(null)
   const [saving, setSaving] = useState(false)
+  const [editorTesting, setEditorTesting] = useState(false)
+  const [editorTestResult, setEditorTestResult] = useState<(ApiRecord & { success: boolean }) | null>(null)
   const [acting, setActing] = useState('')
   const [form] = Form.useForm()
+  const permitsWrite = !writePermission || hasPermissionForTargetMode(user?.permissions, user?.global_permissions, writePermission, scopeAwareWrite)
+  const canModify = Boolean(fields) && permitsWrite
+  const canCreate = canModify && (!globalCreate || !writePermission || hasGlobalPermission(writePermission))
+
+  useEffect(() => {
+    setQuery((current) => current === queryParam ? current : queryParam)
+    setPage(1)
+  }, [queryParam])
 
   useEffect(() => {
     if (editing) form.setFieldsValue(editing)
@@ -122,22 +161,22 @@ export function ResourceListPage({ title, description, endpoint, columns, emptyD
     }
   }, [editing, fields, form])
 
-  const filtered = useMemo(() => {
-    const needle = query.trim().toLocaleLowerCase('ko-KR')
-    if (!needle) return data
-    return data.filter((record) => Object.values(record).some((value) => asText(value, '').toLocaleLowerCase('ko-KR').includes(needle)))
-  }, [data, query])
-
   const executeAction = async (action: RowAction, record: ApiRecord) => {
     const execute = async () => {
       const key = `${action.key}-${rowId(record)}`
       setActing(key)
       try {
-        await request(action.path(record), {
+        const result = await request<ApiRecord | null>(action.path(record), {
           method: action.method || 'POST',
           body: action.body ? jsonBody(action.body(record)) : undefined,
         })
-        message.success(`${action.label} 작업을 완료했습니다.`)
+        if (result?.approval_required === true) {
+          message.info('승인 요청이 등록되었습니다. 검토·승인 완료 후 작업이 실행됩니다.')
+        } else if (result?.success === false) {
+          message.error(asText(pick(result, 'error', 'message'), `${action.label} 검증에 실패했습니다.`))
+        } else {
+          message.success(`${action.label} 작업을 완료했습니다.`)
+        }
         await reload()
       } catch (caught) {
         message.error(caught instanceof Error ? caught.message : `${action.label} 작업에 실패했습니다.`)
@@ -150,8 +189,30 @@ export function ResourceListPage({ title, description, endpoint, columns, emptyD
     } else await execute()
   }
 
-  const openCreate = () => { setEditing(null); setEditorOpen(true) }
-  const openEdit = (record: ApiRecord) => { setEditing(record); setEditorOpen(true) }
+  const openCreate = () => { setEditing(null); setEditorTestResult(null); setEditorOpen(true) }
+  const openEdit = (record: ApiRecord) => { setEditing(record); setEditorTestResult(null); setEditorOpen(true) }
+  const closeEditor = () => {
+    if (saving || editorTesting) return
+    setEditorOpen(false)
+    setEditing(null)
+    setEditorTestResult(null)
+  }
+
+  const testEditorValues = async () => {
+    if (!editorTest || editorTesting || saving) return
+    try {
+      const values = await form.validateFields()
+      setEditorTesting(true)
+      setEditorTestResult(null)
+      const result = await editorTest.run(values, editing)
+      setEditorTestResult(result)
+    } catch (caught) {
+      if (caught && typeof caught === 'object' && 'errorFields' in caught) return
+      setEditorTestResult({ success: false, error: caught instanceof Error ? caught.message : '연결 테스트에 실패했습니다.' })
+    } finally {
+      setEditorTesting(false)
+    }
+  }
 
   const remove = (record: ApiRecord) => {
     modal.confirm({
@@ -186,6 +247,7 @@ export function ResourceListPage({ title, description, endpoint, columns, emptyD
       message.success(editing ? '변경 사항을 저장했습니다.' : '새 항목을 등록했습니다.')
       setEditorOpen(false)
       setEditing(null)
+      setEditorTestResult(null)
       await reload()
     } catch (caught) {
       message.error(caught instanceof Error ? caught.message : '저장하지 못했습니다.')
@@ -204,14 +266,15 @@ export function ResourceListPage({ title, description, endpoint, columns, emptyD
         return column.render ? column.render(value, record) : renderValue(value, column.format, column.suffix)
       },
     }))
-    if (fields || rowActions.length) {
+    const permittedRowActions = rowActions.filter((action) => !action.permission || hasPermissionForTargetMode(user?.permissions, user?.global_permissions, action.permission, scopeAwareWrite))
+    if (canModify || permittedRowActions.length) {
       configured.push({
         title: '작업', key: 'actions', width: 92, fixed: 'right',
         render: (_value, record) => {
-          const actions = rowActions.filter((action) => !action.visible || action.visible(record))
+          const actions = permittedRowActions.filter((action) => !action.visible || action.visible(record))
           const menuItems: MenuProps['items'] = [
             ...actions.map((action) => ({ key: action.key, label: action.label, danger: action.danger, disabled: Boolean(acting) })),
-            ...(fields ? [
+            ...(canModify ? [
               { type: 'divider' as const },
               { key: 'edit', icon: <EditOutlined />, label: '수정' },
               { key: 'delete', icon: <DeleteOutlined />, label: '삭제', danger: true },
@@ -233,7 +296,61 @@ export function ResourceListPage({ title, description, endpoint, columns, emptyD
       })
     }
     return configured
-  }, [columns, fields, rowActions, acting])
+  }, [columns, fields, rowActions, acting, canModify, scopeAwareWrite, user?.global_permissions, user?.permissions])
+
+  const updateQuery = (value: string) => {
+    setQuery(value)
+    setPage(1)
+    const next = new URLSearchParams(searchParams)
+    if (value.trim()) next.set('search', value)
+    else next.delete('search')
+    setSearchParams(next, { replace: true })
+  }
+
+  const editorTitle = editing ? `${title} 수정` : createLabel
+  const editorForm = fields && (
+    <Form
+      form={form}
+      layout="vertical"
+      onFinish={save}
+      onValuesChange={() => setEditorTestResult(null)}
+      requiredMark="optional"
+      disabled={saving || editorTesting}
+    >
+      {fields.map((field) => (
+        <Form.Item key={field.name} name={field.name} label={field.label} valuePropName={field.type === 'switch' ? 'checked' : 'value'} rules={field.required && !(editing && field.type === 'password') ? [{ required: true, message: `${field.label}을(를) 입력해 주세요.` }] : undefined} help={field.help}>
+          {field.type === 'textarea' ? <Input.TextArea rows={4} placeholder={field.placeholder} />
+            : field.type === 'password' ? <Input.Password autoComplete="new-password" placeholder={editing ? '비워 두면 기존 값을 유지합니다' : field.placeholder} />
+              : field.type === 'number' ? <InputNumber min={field.min} max={field.max} style={{ width: '100%' }} placeholder={field.placeholder} />
+                : field.type === 'select' ? <Select options={field.options} placeholder={field.placeholder} />
+                  : field.type === 'switch' ? <Switch checkedChildren="사용" unCheckedChildren="사용 안 함" />
+                    : <Input placeholder={field.placeholder} />}
+        </Form.Item>
+      ))}
+      {editorTestResult && (() => {
+        const version = asText(pick(editorTestResult, 'version', 'remote_version'), '')
+        const latency = pick(editorTestResult, 'latency_ms', 'response_time_ms')
+        const steps = pick(editorTestResult, 'steps', 'checks')
+        const guidance = asText(pick(editorTestResult, 'guidance', 'remediation'), '')
+        return <Alert
+          showIcon
+          type={editorTestResult.success ? 'success' : 'error'}
+          message={editorTestResult.success ? '현재 입력값으로 연결 검증을 통과했습니다' : '현재 입력값으로 연결하지 못했습니다'}
+          description={<Space direction="vertical" size={8} style={{ width: '100%' }}>
+            <Flex gap={8} wrap>{version && <Tag>버전 {version}</Tag>}{latency !== undefined && <Tag>응답 {asNumber(latency)}ms</Tag>}</Flex>
+            {Boolean(editorTestResult.error) && <Typography.Text>{asText(editorTestResult.error)}</Typography.Text>}
+            {Array.isArray(steps) && steps.map((rawStep, index) => {
+              const step = rawStep && typeof rawStep === 'object' ? rawStep as ApiRecord : {}
+              const successful = step.success !== false
+              return <Card key={`${asText(step.name)}-${index}`} size="small"><Flex justify="space-between" gap={12}><div><strong>{asText(step.name, `검사 ${index + 1}`)}</strong><div><Typography.Text type="secondary">{asText(pick(step, 'detail', 'message'), '검사 완료')}</Typography.Text></div></div><Space direction="vertical" align="end" size={2}><Tag color={successful ? 'success' : 'error'}>{successful ? '성공' : '실패'}</Tag>{step.latency_ms !== undefined && <Typography.Text type="secondary">{asNumber(step.latency_ms)}ms</Typography.Text>}</Space></Flex></Card>
+            })}
+            {!editorTestResult.success && guidance && <Typography.Text type="secondary">조치: {guidance}</Typography.Text>}
+            <Typography.Text type="secondary">연결 테스트는 입력값을 저장하지 않습니다. 적용하려면 별도로 저장하세요.</Typography.Text>
+          </Space>}
+        />
+      })()}
+    </Form>
+  )
 
   return (
     <>
@@ -241,7 +358,7 @@ export function ResourceListPage({ title, description, endpoint, columns, emptyD
         title={title}
         description={description}
         onRefresh={reload}
-        extra={fields && <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>{createLabel}</Button>}
+        extra={canCreate && <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>{createLabel}</Button>}
       />
       {dataNote && <div className="data-note">{dataNote}</div>}
       <div className="table-toolbar">
@@ -250,43 +367,51 @@ export function ResourceListPage({ title, description, endpoint, columns, emptyD
           prefix={<SearchOutlined />}
           placeholder={`${title} 검색`}
           value={query}
-          onChange={(event) => setQuery(event.target.value)}
+          onChange={(event) => updateQuery(event.target.value)}
           aria-label={`${title} 검색`}
         />
         <Typography.Text type="secondary">총 {meta.total ?? data.length}건</Typography.Text>
       </div>
-      <AsyncState loading={loading} error={error} onRetry={reload} empty={!loading && !error && filtered.length === 0} emptyDescription={query ? '검색 결과가 없습니다.' : emptyDescription}>
+      <AsyncState loading={loading} error={error} onRetry={reload} empty={!loading && !error && data.length === 0} emptyDescription={query ? '검색 결과가 없습니다.' : emptyDescription}>
         <Table<ApiRecord>
           rowKey={(record) => rowId(record)}
           columns={tableColumns}
-          dataSource={filtered}
+          dataSource={data}
           scroll={{ x: Math.max(900, tableColumns.length * 150) }}
-          pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (total) => `총 ${total}건` }}
+          pagination={{
+            current: page,
+            pageSize,
+            total: meta.total ?? data.length,
+            showSizeChanger: true,
+            showTotal: (total) => `총 ${total}건`,
+            onChange: (nextPage, nextPageSize) => {
+              setPage(nextPageSize !== pageSize ? 1 : nextPage)
+              setPageSize(nextPageSize)
+            },
+          }}
         />
       </AsyncState>
-      {fields && (
-        <Modal
-          title={editing ? `${title} 수정` : createLabel}
+      {canModify && fields && editorVariant === 'drawer' && (
+        <Drawer
+          title={editorTitle}
+          width="min(620px, 100vw)"
           open={editorOpen}
-          onCancel={() => { setEditorOpen(false); setEditing(null) }}
-          onOk={() => form.submit()}
-          confirmLoading={saving}
-          okText="저장"
-          cancelText="취소"
+          onClose={closeEditor}
+          closable={!saving && !editorTesting}
+          maskClosable={!saving && !editorTesting}
           destroyOnHidden
+          footer={<Flex justify="end" gap={8} wrap>
+            <Button onClick={closeEditor} disabled={saving || editorTesting}>취소</Button>
+            {editorTest && <Button icon={<ApiOutlined />} onClick={() => void testEditorValues()} loading={editorTesting} disabled={saving}>{editorTest.label || '연결 테스트'}</Button>}
+            <Button type="primary" onClick={() => form.submit()} loading={saving} disabled={editorTesting}>저장</Button>
+          </Flex>}
         >
-          <Form form={form} layout="vertical" onFinish={save} requiredMark="optional">
-            {fields.map((field) => (
-              <Form.Item key={field.name} name={field.name} label={field.label} valuePropName={field.type === 'switch' ? 'checked' : 'value'} rules={field.required ? [{ required: true, message: `${field.label}을(를) 입력해 주세요.` }] : undefined} help={field.help}>
-                {field.type === 'textarea' ? <Input.TextArea rows={4} placeholder={field.placeholder} />
-                  : field.type === 'password' ? <Input.Password placeholder={editing ? '변경할 때만 입력' : field.placeholder} />
-                    : field.type === 'number' ? <InputNumber min={field.min} max={field.max} style={{ width: '100%' }} placeholder={field.placeholder} />
-                      : field.type === 'select' ? <Select options={field.options} placeholder={field.placeholder} />
-                        : field.type === 'switch' ? <Switch checkedChildren="사용" unCheckedChildren="사용 안 함" />
-                          : <Input placeholder={field.placeholder} />}
-              </Form.Item>
-            ))}
-          </Form>
+          {editorForm}
+        </Drawer>
+      )}
+      {canModify && fields && editorVariant === 'modal' && (
+        <Modal title={editorTitle} open={editorOpen} onCancel={closeEditor} onOk={() => form.submit()} confirmLoading={saving} okText="저장" cancelText="취소" destroyOnHidden>
+          {editorForm}
         </Modal>
       )}
     </>

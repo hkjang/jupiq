@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -69,10 +70,22 @@ func (c *PrometheusClient) Query(ctx context.Context, query string, at time.Time
 			continue
 		}
 		value, err := strconv.ParseFloat(text, 64)
-		if err != nil {
+		if err != nil || !validPrometheusSample(timestamp, value, time.Now()) {
 			continue
 		}
 		points = append(points, MetricPoint{Labels: item.Metric, Value: value, Timestamp: time.UnixMilli(int64(timestamp * 1000)).UTC()})
 	}
 	return points, nil
+}
+
+func validPrometheusSample(timestamp, value float64, now time.Time) bool {
+	if math.IsNaN(timestamp) || math.IsInf(timestamp, 0) || math.IsNaN(value) || math.IsInf(value, 0) {
+		return false
+	}
+	// jupiq's configured metrics are resource usage, counters, latency, bytes,
+	// tokens and cost; negative values are never meaningful for these series.
+	if value < 0 || timestamp < 946684800 || timestamp > float64(now.Add(5*time.Minute).Unix()) {
+		return false
+	}
+	return true
 }

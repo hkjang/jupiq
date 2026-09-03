@@ -22,20 +22,13 @@ import {
   TeamOutlined,
   UserOutlined,
 } from '@ant-design/icons'
-import { Avatar, Badge, Button, Drawer, Dropdown, Flex, Grid, Input, Layout, Menu, Space, Tag, type MenuProps } from 'antd'
+import { Avatar, Button, Drawer, Dropdown, Flex, Grid, Input, Layout, Menu, Space, Tag, type MenuProps } from 'antd'
 import { useMemo, useState, type ReactNode } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
-import { isFeatureMenuVisible, selectedNavigationPath, serviceVersionLabel } from '../utils/navigation'
+import { canAccessNavigationPath, canUseGlobalSearch, firstAccessiblePath, selectedNavigationPath, serviceVersionLabel } from '../utils/navigation'
 
 const { Header, Sider, Content } = Layout
-
-const menuPermissions: Record<string, string[]> = {
-  '/dashboard': ['dashboard:read'], '/hubs': ['hubs:read'], '/users': ['users:read'], '/servers': ['servers:read'],
-  '/gpus': ['gpu:read'], '/projects': ['project:read'], '/policies': ['policy:read'], '/profiles': ['profile:read'],
-  '/images': ['image:read'], '/approvals': ['approval:read'], '/incidents': ['incident:read'], '/audit': ['audit:read'],
-  '/costs': ['cost:read'], '/ai-ops': ['ai:chat', 'usage:read'],
-}
 
 const primaryItems: MenuProps['items'] = [
   { key: '/dashboard', icon: <DashboardOutlined />, label: <Link to="/dashboard">통합 대시보드</Link> },
@@ -60,12 +53,12 @@ const primaryItems: MenuProps['items'] = [
     ],
   },
   { type: 'group', label: 'AI 운영', children: [
-    { key: '/ai-ops', icon: <RobotOutlined />, label: <Link to="/ai-ops">AI 운영 분석</Link> },
+    { key: '/ai-ops', icon: <RobotOutlined />, label: <Link to="/ai-ops">AI·LLM 운영</Link> },
   ] },
 ]
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const { user, version, isAdmin, features, hasPermission, hasAnyPermission, logout } = useAuth()
+  const { user, version, features, hasGlobalPermission, hasAnyGlobalPermission, logout } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
   const screens = Grid.useBreakpoint()
@@ -78,8 +71,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const items = useMemo<MenuProps['items']>(() => {
     const permitted = (item: NonNullable<MenuProps['items']>[number]) => {
       if (!item || !('key' in item) || typeof item.key !== 'string') return true
-      const required = menuPermissions[item.key]
-      return (!required || hasAnyPermission(required)) && isFeatureMenuVisible(item.key, features)
+      return canAccessNavigationPath(item.key, user?.permissions, features, user?.global_permissions)
     }
     const featureAwareItems = (primaryItems || []).map((item) => {
       if (!item) return null
@@ -92,14 +84,17 @@ export function AppShell({ children }: { children: ReactNode }) {
     }).filter(Boolean)
     return [
     ...featureAwareItems,
-    ...(isAdmin ? [{ type: 'group' as const, label: '서비스 관리', children: [
+    ...(hasAnyGlobalPermission(['settings:read', 'settings:write']) ? [{ type: 'group' as const, label: '서비스 관리', children: [
       { key: '/admin/settings', icon: <SettingOutlined />, label: <Link to="/admin/settings">관리자 설정</Link> },
     ] }] : []),
     { type: 'group' as const, label: '개인화', children: [
       { key: '/personal', icon: <IdcardOutlined />, label: <Link to="/personal">내 프로필·API 키</Link> },
     ] },
     ]
-  }, [isAdmin, features, hasAnyPermission])
+  }, [features, hasAnyGlobalPermission, user?.global_permissions, user?.permissions])
+
+  const homePath = firstAccessiblePath(user?.permissions, features, user?.global_permissions)
+  const canGlobalSearch = canUseGlobalSearch(user?.global_permissions)
 
   const toggleCollapsed = () => {
     const next = !collapsed
@@ -111,7 +106,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     { key: 'identity', disabled: true, label: <div className="profile-summary"><strong>{user?.display_name || user?.name || user?.username}</strong><span>{user?.email || user?.department || 'jupiq 사용자'}</span></div> },
     { type: 'divider' },
     { key: 'profile', icon: <UserOutlined />, label: '내 프로필', onClick: () => navigate('/personal?tab=profile') },
-    ...(hasPermission('profile:keys') ? [{ key: 'keys', icon: <CodeOutlined />, label: 'API 키 관리', onClick: () => navigate('/personal?tab=keys') }] : []),
+    ...(hasGlobalPermission('profile:keys') ? [{ key: 'keys', icon: <CodeOutlined />, label: 'API 키 관리', onClick: () => navigate('/personal?tab=keys') }] : []),
     { type: 'divider' },
     { key: 'version', disabled: true, label: <Flex justify="space-between" gap={24}><span>서비스 버전</span><Tag>{serviceVersionLabel(version.version)}</Tag></Flex> },
     { key: 'logout', danger: true, label: '로그아웃', onClick: async () => { await logout(); navigate('/login', { replace: true }) } },
@@ -119,7 +114,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const navigation = (
     <>
-      <Link className="brand" to="/dashboard" aria-label="jupiq 대시보드로 이동">
+      <Link className="brand" to={homePath} aria-label="jupiq 첫 화면으로 이동">
         <img src="/logo.svg" alt="jupiq" />
         {!collapsed && <span>Control Plane</span>}
       </Link>
@@ -154,16 +149,17 @@ export function AppShell({ children }: { children: ReactNode }) {
               icon={desktop ? (collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />) : <MenuUnfoldOutlined />}
               onClick={desktop ? toggleCollapsed : () => setDrawerOpen(true)}
             />
-            {hasPermission('users:read') && <Input.Search
+            {canGlobalSearch && <Input.Search
               className="global-search"
               allowClear
               prefix={<SearchOutlined />}
               placeholder="사용자, Hub, 서버 통합 검색"
               aria-label="통합 검색"
-              onSearch={(term) => term.trim() && navigate(`/users?search=${encodeURIComponent(term.trim())}`)}
+              onSearch={(term) => term.trim() && navigate(`/search?q=${encodeURIComponent(term.trim())}`)}
             />}
             <Space size={8}>
-              {hasPermission('notification:read') && <Button type="text" icon={<Badge dot><BellOutlined /></Badge>} aria-label="알림 센터" onClick={() => navigate('/notifications')} />}
+              {canGlobalSearch && <Button className="mobile-search-button" type="text" icon={<SearchOutlined />} aria-label="통합 검색 열기" onClick={() => navigate('/search')} />}
+              {hasGlobalPermission('notification:read') && <Button type="text" icon={<BellOutlined />} aria-label="알림 센터" onClick={() => navigate('/notifications')} />}
               <Dropdown menu={{ items: profileItems }} trigger={['click']} overlayClassName="profile-dropdown" placement="bottomRight">
                 <Button className="profile-trigger" type="text" aria-label="사용자 메뉴 열기">
                   <Avatar icon={<UserOutlined />} />

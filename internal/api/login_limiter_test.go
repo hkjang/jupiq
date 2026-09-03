@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
@@ -32,5 +33,19 @@ func TestLoginLimiterSuccessClearsFailures(t *testing.T) {
 	limiter.succeeded("192.0.2.2", "user")
 	if !limiter.allow("192.0.2.2", "user") {
 		t.Fatal("successful authentication did not reset limiter")
+	}
+}
+
+func TestLoginLimiterBlocksUsernameSprayByIP(t *testing.T) {
+	limiter := newLoginLimiter()
+	for i := 0; i < loginIPLimit; i++ {
+		username := fmt.Sprintf("spray-%d", i)
+		if !limiter.allow("192.0.2.9", username) {
+			t.Fatalf("IP blocked too early at %d", i)
+		}
+		limiter.failed("192.0.2.9", username)
+	}
+	if limiter.allow("192.0.2.9", "another-user") {
+		t.Fatal("IP-wide username spray was not blocked")
 	}
 }

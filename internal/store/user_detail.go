@@ -30,6 +30,7 @@ type UserHubIdentity struct {
 // notebook source, cell output, prompt, or response body.
 type UserServerSummary struct {
 	ID             int64      `json:"id"`
+	SessionID      int64      `json:"session_id"`
 	HubID          int64      `json:"hub_id"`
 	HubName        string     `json:"hub_name"`
 	Network        string     `json:"network"`
@@ -37,6 +38,7 @@ type UserServerSummary struct {
 	ServerName     string     `json:"server_name"`
 	Status         string     `json:"status"`
 	StartedAt      *time.Time `json:"started_at"`
+	EndedAt        *time.Time `json:"ended_at"`
 	LastActivityAt *time.Time `json:"last_activity_at"`
 	URL            string     `json:"url"`
 	NodeName       string     `json:"node_name"`
@@ -176,18 +178,23 @@ func (s *Store) GetUserDetail(ctx context.Context, username string, options User
 	if err != nil {
 		return UserDetail{}, err
 	}
-	detail.Usage, err = s.userUsagePeriods(ctx, username, now)
+	var features map[string]bool
+	_ = s.GetSetting(ctx, "features", &features)
+	detail.Usage, err = s.userUsagePeriods(ctx, username, now, features["gpu_monitoring"])
 	if err != nil {
 		return UserDetail{}, err
 	}
-
-	var features map[string]bool
-	_ = s.GetSetting(ctx, "features", &features)
 	detail.FeatureEnabled = map[string]bool{
 		"gpu_monitoring":       features["gpu_monitoring"],
 		"llm_usage_monitoring": features["llm_usage_monitoring"],
 	}
 	if !features["gpu_monitoring"] {
+		for index := range detail.Servers.Current {
+			detail.Servers.Current[index].GPUCount = nil
+		}
+		for index := range detail.Servers.History {
+			detail.Servers.History[index].GPUCount = nil
+		}
 		for key, period := range detail.Usage {
 			period.GPUAverage, period.GPUPeak = 0, 0
 			detail.Usage[key] = period
@@ -220,18 +227,21 @@ func (s *Store) userHubIdentities(ctx context.Context, username string) ([]UserH
 }
 
 func (s *Store) userServers(ctx context.Context, username string, current bool, page, limit int) ([]UserServerSummary, int, error) {
-	condition := `NOT ` + userDetailCurrentServerCondition
-	if current {
-		condition = userDetailCurrentServerCondition
-	}
 	offset := (page - 1) * limit
+	condition := `ss.ended_at IS NOT NULL`
+	statusExpression := `'stopped'`
+	if current {
+		condition = `ss.ended_at IS NULL`
+		statusExpression = `COALESCE(s.status,'unknown')`
+	}
 	var total int
-	if err := s.Pool.QueryRow(ctx, `SELECT count(*) FROM servers s WHERE lower(s.username)=lower($1) AND `+condition, username).Scan(&total); err != nil {
+	if err := s.Pool.QueryRow(ctx, `SELECT count(*) FROM server_sessions ss WHERE lower(ss.username)=lower($1) AND `+condition, username).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	rows, err := s.Pool.Query(ctx, `SELECT s.id,s.hub_id,h.name,h.network,s.username,s.server_name,s.status,s.started_at,s.last_activity_at,s.url,s.node_name,s.pod_name,s.image,s.cpu_cores,s.memory_bytes,s.gpu_count,s.synced_at
-		FROM servers s JOIN hubs h ON h.id=s.hub_id
-		WHERE lower(s.username)=lower($1) AND `+condition+` ORDER BY s.synced_at DESC,s.id DESC LIMIT $2 OFFSET $3`, username, limit, offset)
+	rows, err := s.Pool.Query(ctx, `SELECT COALESCE(s.id,0),ss.id,ss.hub_id,h.name,h.network,ss.username,ss.server_name,`+statusExpression+`,ss.started_at,ss.ended_at,ss.last_activity_at,
+		COALESCE(s.url,''),COALESCE(s.node_name,''),COALESCE(s.pod_name,''),COALESCE(s.image,''),s.cpu_cores,s.memory_bytes,s.gpu_count,COALESCE(ss.ended_at,s.synced_at,ss.created_at)
+		FROM server_sessions ss JOIN hubs h ON h.id=ss.hub_id LEFT JOIN servers s ON s.id=ss.server_id
+		WHERE lower(ss.username)=lower($1) AND `+condition+` ORDER BY COALESCE(ss.ended_at,ss.started_at) DESC,ss.id DESC LIMIT $2 OFFSET $3`, username, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -239,7 +249,7 @@ func (s *Store) userServers(ctx context.Context, username string, current bool, 
 	items := []UserServerSummary{}
 	for rows.Next() {
 		var item UserServerSummary
-		if err := rows.Scan(&item.ID, &item.HubID, &item.HubName, &item.Network, &item.Username, &item.ServerName, &item.Status, &item.StartedAt, &item.LastActivityAt, &item.URL, &item.NodeName, &item.PodName, &item.Image, &item.CPUCores, &item.MemoryBytes, &item.GPUCount, &item.SyncedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.SessionID, &item.HubID, &item.HubName, &item.Network, &item.Username, &item.ServerName, &item.Status, &item.StartedAt, &item.EndedAt, &item.LastActivityAt, &item.URL, &item.NodeName, &item.PodName, &item.Image, &item.CPUCores, &item.MemoryBytes, &item.GPUCount, &item.SyncedAt); err != nil {
 			return nil, 0, err
 		}
 		items = append(items, item)
@@ -263,11 +273,16 @@ func (s *Store) userTimeline(ctx context.Context, username string, centralID *in
 		   OR (a.resource_type='managed_user' AND a.resource_id IN (SELECT id::text FROM owned_identities))
 		   OR (a.resource_type='server' AND os.id IS NOT NULL)
 		UNION ALL
-		SELECT 'server-start:'||s.id::text,'server','server.started','', 'server',s.id::text,s.hub_id,h.name,s.id,s.status,'',s.started_at
-		FROM servers s JOIN hubs h ON h.id=s.hub_id WHERE lower(s.username)=lower($1) AND s.started_at IS NOT NULL
+		SELECT 'server-start:'||ss.id::text,'server','server.started','', 'server',COALESCE(ss.server_id::text,''),ss.hub_id,h.name,ss.server_id,
+		       CASE WHEN ss.ended_at IS NULL THEN 'running' ELSE 'stopped' END,'',ss.started_at
+		FROM server_sessions ss JOIN hubs h ON h.id=ss.hub_id WHERE lower(ss.username)=lower($1)
 		UNION ALL
-		SELECT 'server-activity:'||s.id::text,'activity','server.activity','', 'server',s.id::text,s.hub_id,h.name,s.id,s.status,'',s.last_activity_at
-		FROM servers s JOIN hubs h ON h.id=s.hub_id WHERE lower(s.username)=lower($1) AND s.last_activity_at IS NOT NULL
+		SELECT 'server-stop:'||ss.id::text,'server','server.stopped','', 'server',COALESCE(ss.server_id::text,''),ss.hub_id,h.name,ss.server_id,'stopped','',ss.ended_at
+		FROM server_sessions ss JOIN hubs h ON h.id=ss.hub_id WHERE lower(ss.username)=lower($1) AND ss.ended_at IS NOT NULL
+		UNION ALL
+		SELECT 'server-activity:'||ss.id::text,'activity','server.activity','', 'server',COALESCE(ss.server_id::text,''),ss.hub_id,h.name,ss.server_id,
+		       CASE WHEN ss.ended_at IS NULL THEN 'running' ELSE 'stopped' END,'',ss.last_activity_at
+		FROM server_sessions ss JOIN hubs h ON h.id=ss.hub_id WHERE lower(ss.username)=lower($1) AND ss.last_activity_at IS NOT NULL
 		UNION ALL
 		SELECT 'hub-activity:'||u.id::text,'activity','hub.activity','', 'managed_user',u.id::text,u.hub_id,h.name,NULL::bigint,
 		       CASE WHEN u.active THEN 'active' ELSE 'inactive' END,'',u.last_activity_at
@@ -304,7 +319,7 @@ func (s *Store) userTimeline(ctx context.Context, username string, centralID *in
 	return items, total, rows.Err()
 }
 
-func (s *Store) userUsagePeriods(ctx context.Context, username string, now time.Time) (map[string]UserUsagePeriod, error) {
+func (s *Store) userUsagePeriods(ctx context.Context, username string, now time.Time, includeGPU bool) (map[string]UserUsagePeriod, error) {
 	rows, err := s.Pool.Query(ctx, `WITH periods(label,from_ts,sort_order) AS (
 		VALUES ('day',$2::timestamptz,1),('week',$3::timestamptz,2),('month',$4::timestamptz,3)
 	), metrics AS (
@@ -319,19 +334,18 @@ func (s *Store) userUsagePeriods(ctx context.Context, username string, now time.
 		       COALESCE(max(m.value) FILTER(WHERE m.metric_name IN ('gpu','gpu_utilization')),0)::double precision gpu_peak,
 		       max(m.sampled_at) last_activity_at
 		FROM periods p LEFT JOIN metric_samples m ON lower(m.labels->>'username')=lower($1) AND m.sampled_at BETWEEN p.from_ts AND $5
+		 AND ($6 OR m.metric_kind<>'gpu')
 		GROUP BY p.label
-	), server_usage AS (
-		SELECT p.label,count(s.id) server_count,
-		       count(s.id) FILTER(WHERE s.started_at BETWEEN p.from_ts AND $5) server_start_count,
-		       count(s.id) FILTER(WHERE `+userDetailCurrentServerCondition+`) current_servers,
-		       COALESCE(sum(CASE WHEN s.id IS NULL THEN 0 ELSE GREATEST(0,EXTRACT(EPOCH FROM (
-		         LEAST(COALESCE(CASE WHEN `+userDetailCurrentServerCondition+` THEN $5::timestamptz END,s.last_activity_at,s.synced_at),$5::timestamptz)
-		         - GREATEST(COALESCE(s.started_at,s.synced_at),p.from_ts)))) END),0)::double precision server_runtime,
-		       max(COALESCE(s.last_activity_at,s.started_at,s.synced_at)) last_activity_at
-		FROM periods p LEFT JOIN servers s ON lower(s.username)=lower($1)
-		 AND COALESCE(s.started_at,s.synced_at)<=$5
-		 AND COALESCE(CASE WHEN `+userDetailCurrentServerCondition+` THEN $5::timestamptz END,s.last_activity_at,s.synced_at)>=p.from_ts
-		GROUP BY p.label
+		), server_usage AS (
+			SELECT p.label,count(ss.id) server_count,
+			       count(ss.id) FILTER(WHERE ss.started_at BETWEEN p.from_ts AND $5) server_start_count,
+			       count(ss.id) FILTER(WHERE ss.ended_at IS NULL) current_servers,
+			       COALESCE(sum(CASE WHEN ss.id IS NULL THEN 0 ELSE GREATEST(0,EXTRACT(EPOCH FROM (
+			         LEAST(COALESCE(ss.ended_at,$5::timestamptz),$5::timestamptz)-GREATEST(ss.started_at,p.from_ts)))) END),0)::double precision server_runtime,
+			       max(COALESCE(ss.last_activity_at,ss.ended_at,ss.started_at)) last_activity_at
+			FROM periods p LEFT JOIN server_sessions ss ON lower(ss.username)=lower($1)
+			 AND ss.started_at<=$5 AND COALESCE(ss.ended_at,$5::timestamptz)>=p.from_ts
+			GROUP BY p.label
 	), logins AS (
 		SELECT p.label,count(a.id) login_count,max(a.created_at) last_activity_at
 		FROM periods p LEFT JOIN audit_logs a ON lower(a.actor_username)=lower($1)
@@ -342,7 +356,7 @@ func (s *Store) userUsagePeriods(ctx context.Context, username string, now time.
 	       CASE WHEN m.runtime_sample_count>0 THEN m.metric_runtime ELSE s.server_runtime END,m.cpu_average,m.cpu_peak,m.memory_average,m.memory_peak,m.gpu_average,m.gpu_peak,
 	       GREATEST(m.last_activity_at,s.last_activity_at,l.last_activity_at)
 	FROM periods p JOIN metrics m USING(label) JOIN server_usage s USING(label) JOIN logins l USING(label)
-	ORDER BY p.sort_order`, username, now.Add(-24*time.Hour), now.Add(-7*24*time.Hour), now.Add(-30*24*time.Hour), now)
+		ORDER BY p.sort_order`, username, now.Add(-24*time.Hour), now.Add(-7*24*time.Hour), now.Add(-30*24*time.Hour), now, includeGPU)
 	if err != nil {
 		return nil, err
 	}
@@ -406,13 +420,9 @@ func (s *Store) userLLMMetadata(ctx context.Context, username string, from, to t
 			rows.Close()
 			return nil, err
 		}
-		rate := float64(0)
-		if itemCalls > 0 {
-			rate = float64(itemSuccess) / float64(itemCalls)
-		}
 		items = append(items, map[string]any{
 			"username": username, "pod_name": pod, "hub_name": hub, "model": model,
-			"calls": itemCalls, "success": itemSuccess, "errors": itemFailures, "success_rate": rate,
+			"calls": itemCalls, "success": itemSuccess, "errors": itemFailures, "success_rate": observedSuccessRate(itemSuccess, itemFailures), "status_observed_calls": itemSuccess + itemFailures,
 			"latency_p50_ms": p50Value, "latency_p95_ms": p95Value,
 			"input_tokens": input, "output_tokens": output, "total_tokens": total, "bytes": bytes,
 			"estimated_cost": cost, "sampled_at": sampled,
@@ -447,14 +457,10 @@ func (s *Store) userLLMMetadata(ctx context.Context, username string, from, to t
 	}
 	trendRows.Close()
 
-	successRate := float64(0)
-	if calls > 0 {
-		successRate = float64(success) / float64(calls)
-	}
 	base["from"], base["to"] = from, to
 	base["data"], base["top_callers"], base["breakdown"], base["usage_trend"] = items, items, buildLLMBreakdown(items), trend
 	base["summary"] = map[string]any{
-		"calls": calls, "success": success, "errors": failures, "success_rate": successRate,
+		"calls": calls, "success": success, "errors": failures, "success_rate": observedSuccessRate(success, failures), "status_observed_calls": success + failures,
 		"input_tokens": inputTokens, "output_tokens": outputTokens, "total_tokens": totalTokens, // gitleaks:allow -- metric field names, not credentials
 		"latency_p95_ms": p95, "estimated_cost": estimatedCost,
 	}

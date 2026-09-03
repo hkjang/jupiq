@@ -5,7 +5,7 @@ VERSION := $(shell tr -d '[:space:]' < VERSION)
 IMAGE := jupiq:v$(VERSION)
 ARCHIVE := dist/jupiq-v$(VERSION).tar.gz
 
-.PHONY: help deps lint test build image package verify compose-up compose-down clean
+.PHONY: help deps check-version check-screenshots lint test build image package verify compose-up compose-down clean
 
 help: ## 사용 가능한 명령을 표시합니다.
 	@awk 'BEGIN {FS = ":.*## "; printf "jupiq %s\n\n", "$(VERSION)"} /^[a-zA-Z_-]+:.*## / {printf "  %-14s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -14,7 +14,13 @@ deps: ## Go와 프런트엔드 의존성을 설치합니다.
 	go mod download
 	cd web && npm ci
 
-lint: ## 정적 검사를 실행합니다.
+check-version: ## VERSION과 코드·문서·배포 파일의 버전을 검사합니다.
+	./scripts/check-version.sh
+
+check-screenshots: ## manifest·WebP·갤러리·핵심 경로 캡처를 검사합니다.
+	node scripts/check-screenshots.mjs
+
+lint: check-version check-screenshots ## 버전·스크린샷과 정적 검사를 실행합니다.
 	go vet ./...
 	cd web && npm run lint
 

@@ -7,7 +7,7 @@ import { useAuth } from '../auth/AuthContext'
 import { AsyncState } from '../components/AsyncState'
 import { ChartCard } from '../components/ChartCard'
 import { PageHeader } from '../components/PageHeader'
-import { useApi } from '../hooks/useApi'
+import { useLiveLlmUsage, type LlmUsageRange } from '../hooks/useLiveLlmUsage'
 import type { ApiRecord } from '../types'
 import { asNumber, asText, formatDate, normalizePercentValue, pick, statusTone } from '../utils/format'
 
@@ -30,6 +30,12 @@ const suggestions = [
 
 function records(value: unknown): ApiRecord[] {
   return Array.isArray(value) ? value.filter((item): item is ApiRecord => Boolean(item) && typeof item === 'object') : []
+}
+
+function successRate(row: ApiRecord) {
+  if (row.success_rate !== undefined && row.success_rate !== null) return normalizePercentValue(row.success_rate)
+  const observed = asNumber(row.success) + asNumber(row.errors)
+  return observed > 0 ? asNumber(row.success) / observed * 100 : undefined
 }
 
 function OpsChat() {
@@ -67,7 +73,7 @@ function OpsChat() {
 
   return (
     <div className="ai-workspace">
-      <Alert type="info" showIcon icon={<BulbOutlined />} message="v1.0은 스트리밍 AI proxy입니다" description="입력한 메시지만 설정된 Provider로 전달하며 jupiq DB·Prometheus 자료를 자동 첨부하거나 서버·정책을 변경하지 않습니다." />
+      <Alert type="info" showIcon icon={<BulbOutlined />} message="AI 기능은 스트리밍 proxy로 동작합니다" description="입력한 메시지만 설정된 Provider로 전달하며 jupiq DB·Prometheus 자료를 자동 첨부하거나 서버·정책을 변경하지 않습니다." />
       <div className="chat-suggestions" aria-label="추천 질문">{suggestions.map((suggestion) => <Button key={suggestion} onClick={() => void ask(suggestion)}>{suggestion}</Button>)}</div>
       <section className="chat-thread" aria-live="polite" aria-label="AI 운영 분석 대화">
         {!messages.length && <div className="chat-empty"><Avatar size={52} icon={<RobotOutlined />} /><Typography.Title level={3}>운영 질문을 입력해 보세요</Typography.Title><Typography.Paragraph type="secondary">필요한 비민감 자료를 직접 입력하면 OpenAI-compatible Provider 응답을 실시간으로 표시합니다.</Typography.Paragraph></div>}
@@ -83,16 +89,16 @@ function OpsChat() {
 }
 
 function LlmUsagePanel() {
-  const [range, setRange] = useState<'day' | 'week' | 'month'>('day')
-  const { data, loading, error, reload } = useApi<ApiRecord>(`/llm-usage?range=${range}&group_by=detail`)
+  const [range, setRange] = useState<LlmUsageRange>('day')
+  const { data, loading, error, streamError, reload, connection, lastUpdated, stale, transportStale, sourceStale } = useLiveLlmUsage(range)
   const details = records(data?.data || data?.items || data?.top_callers || data?.usage || data?.breakdown)
   const calls = details.reduce((sum, row) => sum + asNumber(pick(row, 'requests', 'request_count', 'calls')), 0)
   const successes = details.reduce((sum, row) => sum + asNumber(pick(row, 'success', 'success_count')), 0)
+  const failures = details.reduce((sum, row) => sum + asNumber(pick(row, 'errors', 'error_count')), 0)
   const costs = details.reduce((sum, row) => sum + asNumber(pick(row, 'estimated_cost', 'cost')), 0)
-  const summary = data?.summary && typeof data.summary === 'object' ? data.summary as ApiRecord : { calls, success_rate: calls ? successes / calls * 100 : 0, estimated_cost: costs }
+  const summary = data?.summary && typeof data.summary === 'object' ? data.summary as ApiRecord : { calls, success_rate: successes + failures > 0 ? successes / (successes + failures) : undefined, estimated_cost: costs }
   const trend = records(data?.usage_trend || data?.trend)
   const top = records(data?.top_callers)
-  const stale = Boolean(data?.stale)
 
   const tokenText = (value: unknown) => value === undefined || value === null ? '수집 불가' : asNumber(value).toLocaleString('ko-KR')
   const money = (value: unknown) => value === undefined || value === null ? '수집 불가' : new Intl.NumberFormat('ko-KR', { style: 'currency', currency: 'KRW', maximumFractionDigits: 0 }).format(asNumber(value))
@@ -101,7 +107,7 @@ function LlmUsagePanel() {
     { title: 'Pod', key: 'pod', width: 210, render: (_value, row) => asText(pick(row, 'pod', 'pod_name')) },
     { title: '모델', key: 'model', width: 150, render: (_value, row) => asText(row.model) },
     { title: '호출', key: 'requests', width: 100, render: (_value, row) => asNumber(pick(row, 'requests', 'request_count', 'calls')).toLocaleString('ko-KR') },
-    { title: '성공률', key: 'success_rate', width: 100, render: (_value, row) => `${normalizePercentValue(row.success_rate !== undefined ? row.success_rate : asNumber(row.calls) ? asNumber(row.success) / asNumber(row.calls) : 0).toLocaleString('ko-KR', { maximumFractionDigits: 1 })}%` },
+    { title: '성공률', key: 'success_rate', width: 100, render: (_value, row) => { const rate = successRate(row); return rate === undefined ? '수집 불가' : `${rate.toLocaleString('ko-KR', { maximumFractionDigits: 1 })}%` } },
     { title: 'P95', key: 'p95', width: 100, render: (_value, row) => pick(row, 'p95_ms', 'latency_p95_ms') === undefined ? '수집 불가' : `${asNumber(pick(row, 'p95_ms', 'latency_p95_ms')).toLocaleString('ko-KR')}ms` },
     { title: 'Input tokens', key: 'input', width: 130, render: (_value, row) => tokenText(pick(row, 'input_tokens')) },
     { title: 'Output tokens', key: 'output', width: 135, render: (_value, row) => tokenText(pick(row, 'output_tokens')) },
@@ -121,31 +127,39 @@ function LlmUsagePanel() {
 
   return (
     <>
-      <Flex justify="space-between" gap={12} wrap><Space direction="vertical" size={0}><Typography.Title level={3}>LLM API 사용량</Typography.Title><Typography.Text type="secondary">마지막 수집 {formatDate(data?.data_freshness || data?.sampled_at)}</Typography.Text></Space><Segmented value={range} options={[{ label: '일', value: 'day' }, { label: '주', value: 'week' }, { label: '월', value: 'month' }]} onChange={(value) => setRange(value as typeof range)} /></Flex>
+      <Flex justify="space-between" gap={12} wrap><Space direction="vertical" size={0}><Typography.Title level={3}>LLM API 사용량</Typography.Title><Typography.Text type="secondary">마지막 수집 {formatDate(data?.data_freshness || data?.sampled_at)} · 마지막 수신 {lastUpdated ? formatDate(lastUpdated.toISOString()) : '아직 수신되지 않음'}</Typography.Text></Space><Space wrap><Tag color={connection === '실시간' ? 'success' : connection === '주기 조회' ? 'processing' : 'warning'}>{connection}</Tag><Button onClick={() => void reload()} loading={loading}>새로고침</Button><Segmented value={range} options={[{ label: '일', value: 'day' }, { label: '주', value: 'week' }, { label: '월', value: 'month' }]} onChange={(value) => setRange(value as typeof range)} /></Space></Flex>
       <Alert className="data-note" type="info" showIcon message="프롬프트와 응답 본문은 수집하지 않습니다" description="운영 메타데이터만 집계하며 token metric이 없는 소스는 ‘수집 불가’로 표시합니다." />
-      {stale && <Alert className="data-note" type="warning" showIcon message="LLM 사용량 데이터가 최신 상태가 아닙니다" description="Prometheus 수집 연동을 확인해 주세요." />}
-      <AsyncState loading={loading} error={error} onRetry={reload} empty={!loading && !error && !data} emptyDescription="수집된 LLM API 사용량이 없습니다.">
+      {(streamError || error) && data && <Alert className="data-note" type="warning" showIcon message="실시간 갱신 중 오류가 발생했습니다" description={`${(streamError || error)?.message} 기존 데이터를 유지하며 주기 조회 또는 재연결을 시도합니다.`} />}
+      {stale && <Alert className="data-note" type="warning" showIcon message="LLM 사용량 데이터가 최신 상태가 아닙니다" description={transportStale ? '실시간 연결 또는 주기 조회가 20초 이상 갱신되지 않았습니다.' : sourceStale ? '화면 연결은 정상이지만 Prometheus 원본 데이터가 오래되었습니다. 수집 연동을 확인해 주세요.' : '수집 연동 상태를 확인해 주세요.'} />}
+      <AsyncState loading={loading && !data} error={error && !data ? error : null} onRetry={() => void reload()} empty={!loading && !error && !data} emptyDescription="수집된 LLM API 사용량이 없습니다.">
         <Row gutter={[16, 16]} className="kpi-grid">
           <Col xs={12} xl={6}><Card><Statistic title="전체 호출" value={asNumber(pick(summary, 'requests', 'request_count', 'calls'))} /></Card></Col>
-          <Col xs={12} xl={6}><Card><Statistic title="성공률" value={normalizePercentValue(summary.success_rate)} suffix="%" precision={1} /></Card></Col>
+          <Col xs={12} xl={6}><Card><Statistic title="성공률" value={successRate(summary) ?? '수집 불가'} suffix={successRate(summary) === undefined ? undefined : '%'} precision={1} /></Card></Col>
           <Col xs={12} xl={6}><Card><Statistic title="P95 지연" value={pick(summary, 'p95_ms', 'latency_p95_ms') === undefined ? '수집 불가' : asNumber(pick(summary, 'p95_ms', 'latency_p95_ms'))} suffix={pick(summary, 'p95_ms', 'latency_p95_ms') === undefined ? undefined : 'ms'} /></Card></Col>
           <Col xs={12} xl={6}><Card><Statistic title="추정 비용" value={money(pick(summary, 'estimated_cost', 'cost'))} /></Card></Col>
         </Row>
         <div className="chart-grid two"><ChartCard title="시간대별 호출 추세" option={trendOption} empty={!trend.length} /><ChartCard title="Top 호출자" option={topOption} empty={!top.length} /></div>
-        <Card title="사용자 → Pod → 모델 상세" extra={<Tag color={stale ? 'warning' : statusTone('success')}>{stale ? 'stale' : '최신'}</Tag>}><Table<ApiRecord> rowKey={(row) => `${asText(row.username)}-${asText(pick(row, 'pod_name', 'pod'))}-${asText(row.model)}`} columns={columns} dataSource={details} scroll={{ x: 1200 }} /></Card>
+        <Card title="사용자 → Pod → 모델 상세" extra={<Tag color={stale ? 'warning' : statusTone('success')}>{stale ? '오래됨' : '최신'}</Tag>}><Table<ApiRecord> rowKey={(row) => `${asText(row.username)}-${asText(pick(row, 'pod_name', 'pod'))}-${asText(row.model)}`} columns={columns} dataSource={details} scroll={{ x: 1200 }} /></Card>
       </AsyncState>
     </>
   )
 }
 
 export function AiOpsPage() {
-  const { features } = useAuth()
-  const items = [{ key: 'analysis', label: 'AI 운영 분석', children: <OpsChat /> }]
-  if (features.llmUsageMonitoring) items.push({ key: 'usage', label: 'LLM API 사용량', children: <LlmUsagePanel /> })
+  const { features, hasGlobalPermission } = useAuth()
+  const canChat = hasGlobalPermission('ai:chat')
+  const canReadUsage = hasGlobalPermission('usage:read')
+  const items = []
+  if (canChat) items.push({ key: 'analysis', label: 'AI 운영 분석', children: <OpsChat /> })
+  if (features.llmUsageMonitoring && canReadUsage) items.push({ key: 'usage', label: 'LLM API 사용량', children: <LlmUsagePanel /> })
+  const title = canChat ? 'AI 운영 분석' : 'LLM API 사용량'
+  const description = canChat
+    ? '입력한 메시지에 대한 Provider 응답을 기본 스트리밍으로 받습니다.'
+    : '사용자·Pod·모델별 Chat Completions 호출 현황과 이용 통계를 확인합니다.'
   return (
     <>
-      <PageHeader title="AI 운영 분석" description="입력한 메시지에 대한 Provider 응답을 기본 스트리밍으로 받습니다." />
-      <Tabs items={items} />
+      <PageHeader title={title} description={description} />
+      {items.length ? <Tabs items={items} /> : <Alert type="info" showIcon message="LLM API 사용량 모니터링이 꺼져 있습니다" description="관리자가 기능을 활성화하면 권한 범위에서 사용자·Pod·모델별 호출 현황을 확인할 수 있습니다." />}
     </>
   )
 }

@@ -6,19 +6,56 @@ import (
 )
 
 type User struct {
-	ID              int64      `json:"id"`
-	Username        string     `json:"username"`
-	DisplayName     string     `json:"display_name"`
-	Email           string     `json:"email"`
-	Department      string     `json:"department"`
-	AuthSource      string     `json:"auth_source"`
-	ExternalSubject *string    `json:"-"`
-	Active          bool       `json:"active"`
-	LastLoginAt     *time.Time `json:"last_login_at"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
-	Roles           []string   `json:"roles"`
-	Permissions     []string   `json:"permissions"`
+	ID                int64             `json:"id"`
+	Username          string            `json:"username"`
+	DisplayName       string            `json:"display_name"`
+	Email             string            `json:"email"`
+	Department        string            `json:"department"`
+	AuthSource        string            `json:"auth_source"`
+	ExternalSubject   *string           `json:"-"`
+	Active            bool              `json:"active"`
+	LastLoginAt       *time.Time        `json:"last_login_at"`
+	CreatedAt         time.Time         `json:"created_at"`
+	UpdatedAt         time.Time         `json:"updated_at"`
+	Roles             []string          `json:"roles"`
+	Permissions       []string          `json:"permissions"`
+	GlobalPermissions []string          `json:"global_permissions"`
+	ScopedPermissions []string          `json:"scoped_permissions"`
+	RoleBindings      []RoleBinding     `json:"role_bindings"`
+	PermissionGrants  []PermissionGrant `json:"-"`
+}
+
+type ScopeClause struct {
+	Type  string `json:"type"`
+	Value string `json:"value"`
+}
+
+type RoleBinding struct {
+	RoleID      int64         `json:"role_id"`
+	RoleKey     string        `json:"role_key"`
+	RoleName    string        `json:"role_name"`
+	ScopeMode   string        `json:"scope_mode"`
+	Scopes      []ScopeClause `json:"scopes"`
+	Permissions []string      `json:"permissions"`
+}
+
+// PermissionGrant is one restricted role binding. Hub IDs within a grant are
+// OR'ed, departments within a grant are OR'ed, and the two dimensions are
+// AND'ed. Multiple grants are OR'ed.
+type PermissionGrant struct {
+	Permissions []string `json:"permissions"`
+	HubIDs      []int64  `json:"hub_ids"`
+	Departments []string `json:"departments"`
+}
+
+type ScopeGroup struct {
+	HubIDs      []int64  `json:"hub_ids"`
+	Departments []string `json:"departments"`
+}
+
+type AccessFilter struct {
+	Global bool         `json:"global"`
+	Groups []ScopeGroup `json:"groups"`
 }
 
 type UserCredential struct {
@@ -53,6 +90,11 @@ type Hub struct {
 	Snapshot               json.RawMessage `json:"snapshot"`
 	CreatedAt              time.Time       `json:"created_at"`
 	UpdatedAt              time.Time       `json:"updated_at"`
+	// CredentialGeneration is an internal, opaque fingerprint of the endpoint,
+	// TLS policy, enabled state, and encrypted API token read by
+	// GetHubCredential. It must never be serialized or persisted outside the
+	// process; write paths use it to reject results from an older Hub target.
+	CredentialGeneration string `json:"-"`
 }
 
 type HubWrite struct {
@@ -66,17 +108,24 @@ type HubWrite struct {
 }
 
 type ManagedUser struct {
-	ID             int64           `json:"id"`
-	HubID          int64           `json:"hub_id"`
-	HubName        string          `json:"hub_name"`
-	Username       string          `json:"username"`
-	DisplayName    string          `json:"display_name"`
-	Department     string          `json:"department"`
-	Admin          bool            `json:"admin"`
-	Active         bool            `json:"active"`
-	LastActivityAt *time.Time      `json:"last_activity_at"`
-	Raw            json.RawMessage `json:"raw,omitempty"`
-	SyncedAt       time.Time       `json:"synced_at"`
+	ID                 int64           `json:"id"`
+	HubID              int64           `json:"hub_id"`
+	HubName            string          `json:"hub_name"`
+	Username           string          `json:"username"`
+	DisplayName        string          `json:"display_name"`
+	Department         string          `json:"department"`
+	Admin              bool            `json:"admin"`
+	Active             bool            `json:"active"`
+	Roles              []string        `json:"roles"`
+	ServerStatus       string          `json:"server_status"`
+	ServerCount        int64           `json:"server_count"`
+	RunningServerCount int64           `json:"running_server_count"`
+	RuntimeSeconds     int64           `json:"runtime_seconds"`
+	CPUCores           *float64        `json:"cpu_cores"`
+	MemoryBytes        *int64          `json:"memory_bytes"`
+	LastActivityAt     *time.Time      `json:"last_activity_at"`
+	Raw                json.RawMessage `json:"-"`
+	SyncedAt           time.Time       `json:"synced_at"`
 }
 
 type Server struct {
@@ -84,6 +133,7 @@ type Server struct {
 	HubID          int64           `json:"hub_id"`
 	HubName        string          `json:"hub_name"`
 	Username       string          `json:"username"`
+	Department     string          `json:"department"`
 	ServerName     string          `json:"server_name"`
 	Status         string          `json:"status"`
 	StartedAt      *time.Time      `json:"started_at"`
@@ -95,7 +145,7 @@ type Server struct {
 	CPUCores       *float64        `json:"cpu_cores"`
 	MemoryBytes    *int64          `json:"memory_bytes"`
 	GPUCount       *int            `json:"gpu_count"`
-	Raw            json.RawMessage `json:"raw,omitempty"`
+	Raw            json.RawMessage `json:"-"`
 	SyncedAt       time.Time       `json:"synced_at"`
 }
 

@@ -35,7 +35,7 @@ function requestSummary(row: ApiRecord) {
 
 export function ApprovalsPage() {
   const { message } = App.useApp()
-  const { features, isAdmin, hasPermission } = useAuth()
+  const { features, isAdmin, hasGlobalPermission } = useAuth()
   const { data, loading, error, reload } = useList<ApiRecord>('/approvals')
   const [selected, setSelected] = useState<{ row: ApiRecord; action: ApprovalAction } | null>(null)
   const [reason, setReason] = useState('')
@@ -94,10 +94,10 @@ export function ApprovalsPage() {
     { title: '요청 시각', key: 'created_at', width: 180, render: (_value, row) => formatDate(pick(row, 'requested_at', 'created_at')) },
     { title: '처리', key: 'actions', fixed: 'right', width: 180, render: (_value, row) => {
       const status = asText(row.status, '')
-      if (status === 'pending_review' && hasPermission('approval:review')) {
+      if (status === 'pending_review' && hasGlobalPermission('approval:review')) {
         return <Button type="primary" size="small" onClick={() => openAction(row, 'review')}>검토</Button>
       }
-      if (status === 'pending' && hasPermission('approval:approve')) {
+      if (status === 'pending' && hasGlobalPermission('approval:approve')) {
         return <Space><Button type="primary" size="small" onClick={() => openAction(row, 'approve')}>승인</Button><Button danger size="small" onClick={() => openAction(row, 'reject')}>반려</Button></Space>
       }
       return <Typography.Text type="secondary">처리 권한 없음</Typography.Text>

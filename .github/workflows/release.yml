@@ -16,17 +16,32 @@ jobs:
   release:
     name: ${{ github.ref_name }} 빌드·검증·릴리스
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:14-alpine@sha256:727876d274666da0b92a445390ba093c84b8e9f8343e1c53cd4e9a7ab2d85310
+        env:
+          POSTGRES_DB: jupiq_test
+          POSTGRES_USER: jupiq
+          POSTGRES_PASSWORD: release-integration-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U jupiq -d jupiq_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: 1.26.7
           cache: true
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           cache: npm
@@ -42,9 +57,16 @@ jobs:
             echo "태그 ${GITHUB_REF_NAME}와 VERSION ${version}이 일치하지 않습니다." >&2
             exit 1
           fi
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" "origin/main"; then
+            echo "릴리스 태그가 origin/main에 포함된 commit을 가리키지 않습니다." >&2
+            exit 1
+          fi
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
           echo "image=jupiq:${expected_tag}" >> "${GITHUB_OUTPUT}"
           echo "archive=dist/jupiq-${expected_tag}.tar.gz" >> "${GITHUB_OUTPUT}"
+
+      - name: 저장소 버전 정합성 확인
+        run: ./scripts/check-version.sh
 
       - name: 소스 검사와 테스트
         run: |
@@ -53,10 +75,15 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
           govulncheck ./...
           go test ./...
+          JUPIQ_INTEGRATION_TEST_DSN='postgres://jupiq:release-integration-password@127.0.0.1:5432/jupiq_test?sslmode=disable' \
+            go test -count=1 -p=1 -run Integration ./internal/store ./internal/api
+          node scripts/check-screenshots.mjs
           cd web
           npm ci
+          npm audit --audit-level=high
           npm run lint
           npm test
+          npm run build
 
       - name: 서비스 이미지 빌드
         run: ./scripts/build-image.sh "${{ steps.version.outputs.version }}"
@@ -70,7 +97,7 @@ jobs:
           ./scripts/verify-offline.sh "${{ steps.version.outputs.archive }}"
 
       - name: 오프라인 내부망 기동 검증 준비
-        run: docker pull postgres:16-alpine
+        run: docker pull postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
 
       - name: 오프라인 내부망 기동 검증
         run: ./scripts/offline-smoke-test.sh
@@ -84,17 +111,60 @@ jobs:
             exit 1
           fi
 
+      - name: 릴리스 자산 SHA-256 계산
+        id: checksum
+        shell: bash
+        run: |
+          sha256="$(sha256sum "${{ steps.version.outputs.archive }}" | awk '{print $1}')"
+          [[ "${sha256}" =~ ^[0-9a-f]{64}$ ]]
+          echo "sha256=${sha256}" >> "${GITHUB_OUTPUT}"
+          echo "SHA-256: ${sha256}"
+          {
+            echo "### jupiq ${GITHUB_REF_NAME} 오프라인 자산"
+            echo
+            echo "- 파일: \`jupiq-${GITHUB_REF_NAME}.tar.gz\`"
+            echo "- SHA-256: \`${sha256}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
       - name: GitHub Release 생성
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           name: jupiq ${{ github.ref_name }}
           body: |
             오프라인망 반입용 단일 Docker 이미지입니다.
 
+            - Docker image: `jupiq:${{ github.ref_name }}`
+            - Architecture: `linux/amd64`
+            - PostgreSQL: `14 이상`
+            - SHA-256: `${{ steps.checksum.outputs.sha256 }}`
+
+            데이터베이스 migration은 기동 시 자동 적용됩니다. 업그레이드 전에 PostgreSQL과 `ENCRYPTION_KEY`를 백업하세요. 이전 버전으로 내릴 때 schema downgrade는 자동으로 수행되지 않습니다.
+
             ```bash
+            echo "${{ steps.checksum.outputs.sha256 }}  jupiq-${{ github.ref_name }}.tar.gz" | sha256sum -c -
             gzip -dc jupiq-${{ github.ref_name }}.tar.gz | docker load
             docker image inspect jupiq:${{ github.ref_name }}
             ```
           files: ${{ steps.version.outputs.archive }}
           fail_on_unmatched_files: true
+          overwrite_files: true
           generate_release_notes: true
+
+      - name: 원격 Release 단일 자산 강제 및 검증
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_ASSET: jupiq-${{ github.ref_name }}.tar.gz
+        run: |
+          release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" --jq '.id')"
+          while IFS=$'\t' read -r asset_id asset_name; do
+            [[ -n "${asset_id}" ]] || continue
+            if [[ "${asset_name}" != "${EXPECTED_ASSET}" ]]; then
+              gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}"
+            fi
+          done < <(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets" --jq '.[] | [.id,.name] | @tsv')
+          mapfile -t remote_assets < <(gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets" --jq '.[].name')
+          if [[ "${#remote_assets[@]}" -ne 1 || "${remote_assets[0]}" != "${EXPECTED_ASSET}" ]]; then
+            printf '원격 Release 자산이 단일 파일 계약과 다릅니다: %s\n' "${remote_assets[*]}" >&2
+            exit 1
+          fi

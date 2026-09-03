@@ -1,6 +1,7 @@
 package api
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -25,5 +26,17 @@ func TestAPIKeyPolicyRejectsExcessLifetime(t *testing.T) {
 	expires := &value
 	if err := applyAPIKeyPolicy(apiKeyPolicy{RotationDays: 30, MaxLifetimeDays: 90}, []string{"dashboard:read"}, &expires); err == nil {
 		t.Fatal("expiry beyond maximum lifetime was accepted")
+	}
+}
+
+func TestValidateAPIKeyPolicyFailsClosedOnMalformedPersistence(t *testing.T) {
+	for _, policy := range []apiKeyPolicy{
+		{},
+		{RotationDays: 100, MaxLifetimeDays: 90},
+		{RotationDays: 30, MaxLifetimeDays: 90, Permissions: []string{strings.Repeat("x", 101)}},
+	} {
+		if err := validateAPIKeyPolicy(policy); err == nil {
+			t.Fatalf("malformed persisted policy was accepted: %#v", policy)
+		}
 	}
 }

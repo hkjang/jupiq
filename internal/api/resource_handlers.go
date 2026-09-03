@@ -21,15 +21,22 @@ var resourceKinds = map[string]string{
 func (s *Server) registerResources(mux *http.ServeMux) {
 	for path, kind := range resourceKinds {
 		path, kind := path, kind
-		mux.HandleFunc("GET /api/v1/"+path, s.require(kind+":read", func(w http.ResponseWriter, r *http.Request) { s.resourceList(w, r, kind) }))
-		mux.HandleFunc("POST /api/v1/"+path, s.require(kind+":write", func(w http.ResponseWriter, r *http.Request) { s.resourceCreate(w, r, kind) }))
-		mux.HandleFunc("GET /api/v1/"+path+"/{id}", s.require(kind+":read", func(w http.ResponseWriter, r *http.Request) { s.resourceGet(w, r, kind) }))
-		mux.HandleFunc("PUT /api/v1/"+path+"/{id}", s.require(kind+":write", func(w http.ResponseWriter, r *http.Request) { s.resourceUpdate(w, r, kind) }))
-		mux.HandleFunc("DELETE /api/v1/"+path+"/{id}", s.require(kind+":write", func(w http.ResponseWriter, r *http.Request) { s.resourceDelete(w, r, kind) }))
+		mux.HandleFunc("GET /api/v1/"+path, s.require(resourcePermission(kind, "read"), func(w http.ResponseWriter, r *http.Request) { s.resourceList(w, r, kind) }))
+		mux.HandleFunc("POST /api/v1/"+path, s.require(resourcePermission(kind, "write"), func(w http.ResponseWriter, r *http.Request) { s.resourceCreate(w, r, kind) }))
+		mux.HandleFunc("GET /api/v1/"+path+"/{id}", s.require(resourcePermission(kind, "read"), func(w http.ResponseWriter, r *http.Request) { s.resourceGet(w, r, kind) }))
+		mux.HandleFunc("PUT /api/v1/"+path+"/{id}", s.require(resourcePermission(kind, "write"), func(w http.ResponseWriter, r *http.Request) { s.resourceUpdate(w, r, kind) }))
+		mux.HandleFunc("DELETE /api/v1/"+path+"/{id}", s.require(resourcePermission(kind, "write"), func(w http.ResponseWriter, r *http.Request) { s.resourceDelete(w, r, kind) }))
 	}
 	mux.HandleFunc("POST /api/v1/approvals/{id}/approve", s.require("approval:approve", s.approvalApprove))
 	mux.HandleFunc("POST /api/v1/approvals/{id}/review", s.require("approval:review", s.approvalReview))
 	mux.HandleFunc("POST /api/v1/approvals/{id}/reject", s.require("approval:approve", s.approvalReject))
+}
+
+func resourcePermission(kind, action string) string {
+	if kind == "profile" {
+		return "profiles:" + action
+	}
+	return kind + ":" + action
 }
 
 func (s *Server) resourceList(w http.ResponseWriter, r *http.Request, kind string) {
@@ -251,7 +258,11 @@ func (s *Server) approvalReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := principal(r)
-	details["review"] = map[string]any{"status": "reviewed", "reviewed_at": time.Now().UTC(), "reviewed_by": p.User.Username, "reason": input.Reason}
+	if code, message := approvalActorConflict(details, p.User.ID, p.User.Username, "review"); code != "" {
+		apiError(w, r, http.StatusConflict, code, message)
+		return
+	}
+	details["review"] = map[string]any{"status": "reviewed", "reviewed_at": time.Now().UTC(), "reviewed_by_user_id": p.User.ID, "reviewed_by": p.User.Username, "reason": input.Reason}
 	raw, _ := json.Marshal(details)
 	saved, transitioned, err := s.Store.TransitionResource(r.Context(), "approval", id, "pending_review", store.ResourceWrite{Name: approval.Name, Status: "pending", OwnerUserID: approval.OwnerUserID, Data: raw}, p.User.ID)
 	if err != nil {
@@ -306,8 +317,14 @@ func (s *Server) approvalApprove(w http.ResponseWriter, r *http.Request) {
 		apiError(w, r, http.StatusBadRequest, "reason_required", err.Error())
 		return
 	}
+	approverPrincipal := principal(r)
+	approver := approverPrincipal.User.Username
+	if code, message := approvalActorConflict(details, approverPrincipal.User.ID, approver, "approve"); code != "" {
+		apiError(w, r, http.StatusConflict, code, message)
+		return
+	}
 	details["approval_reason"] = input.Reason
-	details["execution"] = map[string]any{"status": "executing", "started_at": time.Now().UTC(), "idempotency_key": requestID(r), "approved_by": principal(r).User.Username}
+	details["execution"] = map[string]any{"status": "executing", "started_at": time.Now().UTC(), "idempotency_key": requestID(r), "approved_by_user_id": approverPrincipal.User.ID, "approved_by": approver}
 	executingData, _ := json.Marshal(details)
 	executing, claimed, err := s.Store.TransitionResource(r.Context(), "approval", id, "pending", store.ResourceWrite{Name: approval.Name, Status: "executing", OwnerUserID: approval.OwnerUserID, Data: executingData}, principal(r).User.ID)
 	if err != nil {
@@ -322,7 +339,7 @@ func (s *Server) approvalApprove(w http.ResponseWriter, r *http.Request) {
 		serverID := int64(numberFromAny(details["server_id"]))
 		action, _ := details["action"].(string)
 		if err := s.executeServerAction(r, serverID, action); err != nil {
-			details["execution"] = map[string]any{"status": "failed", "finished_at": time.Now().UTC(), "idempotency_key": requestID(r), "error": err.Error()}
+			details["execution"] = map[string]any{"status": "failed", "finished_at": time.Now().UTC(), "idempotency_key": requestID(r), "approved_by_user_id": approverPrincipal.User.ID, "approved_by": approver, "error": err.Error()}
 			failedData, _ := json.Marshal(details)
 			failed, _, transitionErr := s.Store.TransitionResource(r.Context(), "approval", id, "executing", store.ResourceWrite{Name: approval.Name, Status: "failed", OwnerUserID: approval.OwnerUserID, Data: failedData}, principal(r).User.ID)
 			if transitionErr != nil {
@@ -334,7 +351,7 @@ func (s *Server) approvalApprove(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	details["execution"] = map[string]any{"status": "approved", "finished_at": time.Now().UTC(), "idempotency_key": requestID(r)}
+	details["execution"] = map[string]any{"status": "approved", "finished_at": time.Now().UTC(), "idempotency_key": requestID(r), "approved_by_user_id": approverPrincipal.User.ID, "approved_by": approver}
 	approvedData, _ := json.Marshal(details)
 	saved, transitioned, err := s.Store.TransitionResource(r.Context(), "approval", id, "executing", store.ResourceWrite{Name: approval.Name, Status: "approved", OwnerUserID: approval.OwnerUserID, Data: approvedData}, principal(r).User.ID)
 	if err != nil {
@@ -347,6 +364,39 @@ func (s *Server) approvalApprove(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = s.Store.RecordAudit(r.Context(), requestAudit(r, "approval.approve", "approval", strconv.FormatInt(id, 10), "success", input.Reason, flattenResource(approval), flattenResource(saved)))
 	data(w, http.StatusOK, flattenResource(saved))
+}
+
+func approvalActorConflict(details map[string]any, actorID int64, actor, stage string) (string, string) {
+	requestedBy, _ := details["requested_by"].(string)
+	requestedByID := int64(numberFromAny(details["requested_by_user_id"]))
+	requesterMatches := requestedByID > 0 && actorID > 0 && requestedByID == actorID
+	if requestedByID == 0 {
+		requesterMatches = requestedBy != "" && strings.EqualFold(strings.TrimSpace(requestedBy), strings.TrimSpace(actor))
+	}
+	if requesterMatches {
+		switch stage {
+		case "review":
+			return "self_review_forbidden", "요청자는 자신의 요청을 검토할 수 없습니다"
+		case "reject":
+			return "self_rejection_forbidden", "요청자는 자신의 요청을 반려할 수 없습니다"
+		default:
+			return "self_approval_forbidden", "요청자는 자신의 요청을 승인할 수 없습니다"
+		}
+	}
+	if stage == "approve" {
+		if review, ok := details["review"].(map[string]any); ok {
+			reviewer, _ := review["reviewed_by"].(string)
+			reviewerID := int64(numberFromAny(review["reviewed_by_user_id"]))
+			reviewerMatches := reviewerID > 0 && actorID > 0 && reviewerID == actorID
+			if reviewerID == 0 {
+				reviewerMatches = reviewer != "" && strings.EqualFold(strings.TrimSpace(reviewer), strings.TrimSpace(actor))
+			}
+			if reviewerMatches {
+				return "reviewer_approver_conflict", "검토자와 승인자는 서로 달라야 합니다"
+			}
+		}
+	}
+	return "", ""
 }
 func (s *Server) approvalReject(w http.ResponseWriter, r *http.Request) {
 	id, err := intPath(r, "id")
@@ -382,7 +432,12 @@ func (s *Server) approvalReject(w http.ResponseWriter, r *http.Request) {
 		apiError(w, r, http.StatusBadRequest, "reason_required", err.Error())
 		return
 	}
-	details["rejection"] = map[string]any{"reason": inputBody.Reason, "rejected_at": time.Now().UTC(), "rejected_by": principal(r).User.Username, "from_status": approval.Status}
+	rejector := principal(r)
+	if code, message := approvalActorConflict(details, rejector.User.ID, rejector.User.Username, "reject"); code != "" {
+		apiError(w, r, http.StatusConflict, code, message)
+		return
+	}
+	details["rejection"] = map[string]any{"reason": inputBody.Reason, "rejected_at": time.Now().UTC(), "rejected_by_user_id": rejector.User.ID, "rejected_by": rejector.User.Username, "from_status": approval.Status}
 	raw, _ := json.Marshal(details)
 	saved, transitioned, err := s.Store.TransitionResource(r.Context(), "approval", id, approval.Status, store.ResourceWrite{Name: approval.Name, Status: "rejected", OwnerUserID: approval.OwnerUserID, Data: raw}, principal(r).User.ID)
 	if err != nil {
@@ -412,17 +467,21 @@ func numberFromAny(v any) float64 {
 }
 
 func (s *Server) registerHubs(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/v1/hubs", s.require("hubs:read", s.hubsList))
+	mux.HandleFunc("GET /api/v1/hubs", s.require("", s.hubsList))
 	mux.HandleFunc("POST /api/v1/hubs", s.require("hubs:write", s.hubCreate))
-	mux.HandleFunc("GET /api/v1/hubs/{id}", s.require("hubs:read", s.hubGet))
-	mux.HandleFunc("PUT /api/v1/hubs/{id}", s.require("hubs:write", s.hubUpdate))
-	mux.HandleFunc("DELETE /api/v1/hubs/{id}", s.require("hubs:write", s.hubDelete))
-	mux.HandleFunc("POST /api/v1/hubs/{id}/test", s.require("hubs:write", s.hubTest))
-	mux.HandleFunc("POST /api/v1/hubs/{id}/sync", s.require("hubs:write", s.hubSync))
-	mux.HandleFunc("POST /api/v1/servers/{id}/{action}", s.require("servers:operate", s.serverAction))
+	mux.HandleFunc("GET /api/v1/hubs/{id}", s.require("", s.hubGet))
+	mux.HandleFunc("PUT /api/v1/hubs/{id}", s.require("", s.hubUpdate))
+	mux.HandleFunc("DELETE /api/v1/hubs/{id}", s.require("", s.hubDelete))
+	mux.HandleFunc("POST /api/v1/hubs/{id}/test", s.require("", s.hubTest))
+	mux.HandleFunc("POST /api/v1/hubs/{id}/sync", s.require("", s.hubSync))
+	mux.HandleFunc("POST /api/v1/servers/{id}/{action}", s.require("", s.serverAction))
 }
 func (s *Server) hubsList(w http.ResponseWriter, r *http.Request) {
-	items, err := s.Store.ListHubs(r.Context())
+	access, ok := scopedAccess(w, r, "hubs:read")
+	if !ok {
+		return
+	}
+	items, err := s.Store.ListHubsWithAccess(r.Context(), access)
 	if err != nil {
 		handleStoreError(w, r, err)
 		return
@@ -479,6 +538,9 @@ func (s *Server) hubGet(w http.ResponseWriter, r *http.Request) {
 		apiError(w, r, 400, "invalid_id", "Hub ID가 올바르지 않습니다")
 		return
 	}
+	if !scopedTargetAllowed(w, r, "hubs:read", id, "") {
+		return
+	}
 	item, err := s.Store.GetHub(r.Context(), id)
 	if err != nil {
 		handleStoreError(w, r, err)
@@ -490,6 +552,9 @@ func (s *Server) hubUpdate(w http.ResponseWriter, r *http.Request) {
 	id, err := intPath(r, "id")
 	if err != nil {
 		apiError(w, r, 400, "invalid_id", "Hub ID가 올바르지 않습니다")
+		return
+	}
+	if !scopedTargetAllowed(w, r, "hubs:write", id, "") {
 		return
 	}
 	before, err := s.Store.GetHub(r.Context(), id)
@@ -516,6 +581,9 @@ func (s *Server) hubDelete(w http.ResponseWriter, r *http.Request) {
 		apiError(w, r, 400, "invalid_id", "Hub ID가 올바르지 않습니다")
 		return
 	}
+	if !scopedTargetAllowed(w, r, "hubs:write", id, "") {
+		return
+	}
 	before, err := s.Store.GetHub(r.Context(), id)
 	if err != nil {
 		handleStoreError(w, r, err)
@@ -535,12 +603,10 @@ func (s *Server) hubTest(w http.ResponseWriter, r *http.Request) {
 		apiError(w, r, 400, "invalid_id", "Hub ID가 올바르지 않습니다")
 		return
 	}
-	hub, err := s.Store.GetHub(r.Context(), id)
-	if err != nil {
-		handleStoreError(w, r, err)
+	if !scopedTargetAllowed(w, r, "hubs:write", id, "") {
 		return
 	}
-	token, err := s.Store.HubToken(r.Context(), id)
+	hub, token, err := s.Store.GetHubCredential(r.Context(), id)
 	if err != nil {
 		handleStoreError(w, r, err)
 		return
@@ -548,7 +614,15 @@ func (s *Server) hubTest(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := contextWithTimeout(r, 15*time.Second)
 	defer cancel()
 	result := integration.TestConnection(ctx, integration.TestRequest{Type: "jupyterhub", Config: map[string]any{"base_url": hub.BaseURL, "verify_tls": hub.VerifyTLS}, Secret: token})
-	_ = s.Store.UpdateHubHealth(r.Context(), id, result.Success, result.Version, result.Error, map[string]any{"test_checked_at": result.CheckedAt})
+	healthStored, err := s.Store.UpdateHubHealthIfCurrent(r.Context(), hub, result.Success, result.Version, result.Error, map[string]any{"test_checked_at": result.CheckedAt})
+	if err != nil {
+		handleStoreError(w, r, err)
+		return
+	}
+	if !healthStored {
+		apiError(w, r, http.StatusConflict, "hub_configuration_changed", "연결 테스트 중 Hub 설정이 변경되어 이전 응답을 폐기했습니다. 다시 시도해 주세요")
+		return
+	}
 	status := "success"
 	if !result.Success {
 		status = "failure"
@@ -562,12 +636,10 @@ func (s *Server) hubSync(w http.ResponseWriter, r *http.Request) {
 		apiError(w, r, 400, "invalid_id", "Hub ID가 올바르지 않습니다")
 		return
 	}
-	hub, err := s.Store.GetHub(r.Context(), id)
-	if err != nil {
-		handleStoreError(w, r, err)
+	if !scopedTargetAllowed(w, r, "hubs:write", id, "") {
 		return
 	}
-	token, err := s.Store.HubToken(r.Context(), id)
+	hub, token, err := s.Store.GetHubCredential(r.Context(), id)
 	if err != nil {
 		handleStoreError(w, r, err)
 		return
@@ -584,16 +656,29 @@ func (s *Server) hubSync(w http.ResponseWriter, r *http.Request) {
 		var users []integration.JupyterUser
 		users, err = client.Users(ctx)
 		if err == nil {
-			err = s.Store.SyncHubUsers(ctx, hub, users)
+			var stored bool
+			stored, err = s.Store.SyncHubUsersIfCurrent(ctx, hub, users)
+			if err == nil && !stored {
+				apiError(w, r, http.StatusConflict, "hub_configuration_changed", "동기화 중 Hub 설정이 변경되어 이전 응답을 폐기했습니다. 다시 시도해 주세요")
+				return
+			}
 			if err == nil {
-				_ = s.Store.UpdateHubHealth(ctx, id, true, info.Version, "", map[string]any{"users": len(users), "synced_at": time.Now().UTC()})
+				healthStored, healthErr := s.Store.UpdateHubHealthIfCurrent(ctx, hub, true, info.Version, "", map[string]any{"users": len(users), "synced_at": time.Now().UTC()})
+				if healthErr != nil {
+					handleStoreError(w, r, healthErr)
+					return
+				}
+				if !healthStored {
+					apiError(w, r, http.StatusConflict, "hub_configuration_changed", "동기화 완료 처리 중 Hub 설정이 변경되어 이전 응답을 폐기했습니다. 다시 시도해 주세요")
+					return
+				}
 				_ = s.Store.RecordAudit(r.Context(), requestAudit(r, "hub.sync", "hub", strconv.FormatInt(id, 10), "success", "", nil, map[string]any{"users": len(users)}))
 				data(w, http.StatusOK, map[string]any{"synced": true, "users": len(users), "version": info.Version})
 				return
 			}
 		}
 	}
-	_ = s.Store.UpdateHubHealth(r.Context(), id, false, info.Version, err.Error(), nil)
+	_, _ = s.Store.UpdateHubHealthIfCurrent(r.Context(), hub, false, info.Version, err.Error(), nil)
 	_ = s.Store.RecordAudit(r.Context(), requestAudit(r, "hub.sync", "hub", strconv.FormatInt(id, 10), "failure", err.Error(), nil, nil))
 	apiError(w, r, 502, "hub_sync_failed", "JupyterHub 동기화에 실패했습니다: "+err.Error())
 }
@@ -602,6 +687,14 @@ func (s *Server) serverAction(w http.ResponseWriter, r *http.Request) {
 	id, err := intPath(r, "id")
 	if err != nil {
 		apiError(w, r, 400, "invalid_id", "서버 ID가 올바르지 않습니다")
+		return
+	}
+	server, err := s.Store.GetServer(r.Context(), id)
+	if err != nil {
+		handleStoreError(w, r, err)
+		return
+	}
+	if !scopedTargetAllowed(w, r, "servers:operate", server.HubID, server.Department) {
 		return
 	}
 	action := r.PathValue("action")
@@ -620,7 +713,7 @@ func (s *Server) serverAction(w http.ResponseWriter, r *http.Request) {
 		if workflow.ManagerReviewEnabled {
 			initialStatus = "pending_review"
 		}
-		payload, _ := json.Marshal(map[string]any{"resource_type": "server", "request_type": "server_action", "server_id": id, "action": action, "requested_by": p.User.Username, "requested_at": time.Now().UTC(), "workflow": workflow})
+		payload, _ := json.Marshal(map[string]any{"resource_type": "server", "request_type": "server_action", "server_id": id, "action": action, "requested_by_user_id": p.User.ID, "requested_by": p.User.Username, "requested_at": time.Now().UTC(), "workflow": workflow})
 		approval, err := s.Store.CreateResource(r.Context(), "approval", store.ResourceWrite{Name: fmt.Sprintf("서버 %d %s 요청", id, action), Status: initialStatus, OwnerUserID: &p.User.ID, Data: payload}, p.User.ID)
 		if err != nil {
 			handleStoreError(w, r, err)
@@ -639,15 +732,7 @@ func (s *Server) serverAction(w http.ResponseWriter, r *http.Request) {
 	data(w, http.StatusAccepted, map[string]any{"approval_required": false, "action": action, "accepted": true})
 }
 func (s *Server) executeServerAction(r *http.Request, id int64, action string) error {
-	server, err := s.Store.GetServer(r.Context(), id)
-	if err != nil {
-		return err
-	}
-	hub, err := s.Store.GetHub(r.Context(), server.HubID)
-	if err != nil {
-		return err
-	}
-	token, err := s.Store.HubToken(r.Context(), hub.ID)
+	server, hub, token, err := s.Store.GetServerActionCredential(r.Context(), id)
 	if err != nil {
 		return err
 	}

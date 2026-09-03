@@ -13,7 +13,7 @@ export function LoginPage() {
   const location = useLocation()
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
-  const from = (location.state as { from?: string } | null)?.from || '/dashboard'
+  const from = (location.state as { from?: string } | null)?.from || '/'
 
   if (!loading && user) return <Navigate to={from} replace />
 
@@ -36,7 +36,7 @@ export function LoginPage() {
   }
 
   return (
-    <main className="login-page">
+    <main id="main-content" className="login-page" tabIndex={-1}>
       <section className="login-story" aria-label="서비스 소개">
         <img src="/logo.svg" alt="jupiq" className="login-logo" />
         <Tag color="blue">AI WORKSPACE CONTROL PLANE</Tag>
@@ -47,7 +47,7 @@ export function LoginPage() {
         <div className="login-feature-grid">
           <div><strong>통합 관제</strong><span>망별 상태와 자원 흐름</span></div>
           <div><strong>안전한 운영</strong><span>승인, RBAC, 감사 추적</span></div>
-          <div><strong>효율 분석</strong><span>GPU 낭비와 용량 예측</span></div>
+          <div><strong>효율 분석</strong><span>실시간 이용량과 자원 효율</span></div>
         </div>
       </section>
       <section className="login-panel" aria-label="로그인">
@@ -76,7 +76,7 @@ export function LoginPage() {
           </Form>
           <Flex className="login-version" justify="center" gap={8} wrap>
             <span>jupiq {serviceVersionLabel(version.version)}</span>
-            {version.commit && <span>· {version.commit.slice(0, 8)}</span>}
+            {version.commit && version.commit !== 'unknown' && <span>· {version.commit.slice(0, 8)}</span>}
           </Flex>
         </Card>
       </section>

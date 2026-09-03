@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/hkjang/jupiq/internal/store"
@@ -14,22 +15,35 @@ type apiKeyPolicy struct {
 	Permissions     []string `json:"key_permissions"`
 }
 
-func (s *Server) loadAPIKeyPolicy(ctx context.Context) apiKeyPolicy {
-	policy := apiKeyPolicy{RotationDays: 90, MaxLifetimeDays: 365}
+func (s *Server) loadAPIKeyPolicy(ctx context.Context) (apiKeyPolicy, error) {
+	defaults := apiKeyPolicy{RotationDays: 90, MaxLifetimeDays: 365}
 	var saved apiKeyPolicy
-	if s.Store.GetSetting(ctx, "security", &saved) == nil {
-		if saved.RotationDays > 0 {
-			policy.RotationDays = saved.RotationDays
-		}
-		if saved.MaxLifetimeDays > 0 {
-			policy.MaxLifetimeDays = saved.MaxLifetimeDays
-		}
-		policy.Permissions = saved.Permissions
+	err := s.Store.GetSetting(ctx, "security", &saved)
+	if errors.Is(err, store.ErrNotFound) {
+		return defaults, nil
+	}
+	if err != nil {
+		return apiKeyPolicy{}, fmt.Errorf("API 키 정책을 읽을 수 없습니다: %w", err)
+	}
+	if err := validateAPIKeyPolicy(saved); err != nil {
+		return apiKeyPolicy{}, err
+	}
+	return saved, nil
+}
+
+func validateAPIKeyPolicy(policy apiKeyPolicy) error {
+	if policy.RotationDays < 1 || policy.RotationDays > 3650 || policy.MaxLifetimeDays < 1 || policy.MaxLifetimeDays > 3650 {
+		return errors.New("API 키 정책 일수가 허용 범위를 벗어났습니다")
 	}
 	if policy.RotationDays > policy.MaxLifetimeDays {
-		policy.RotationDays = policy.MaxLifetimeDays
+		return errors.New("API 키 회전 주기는 최대 유효기간보다 클 수 없습니다")
 	}
-	return policy
+	if len(policy.Permissions) > 0 {
+		if err := store.ValidateScopes(policy.Permissions); err != nil {
+			return fmt.Errorf("API 키 허용 권한이 잘못되었습니다: %w", err)
+		}
+	}
+	return nil
 }
 
 func applyAPIKeyPolicy(policy apiKeyPolicy, scopes []string, expiresAt **time.Time) error {

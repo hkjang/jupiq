@@ -21,6 +21,7 @@ image="jupiq:v${version}"
 
 echo "이미지 빌드: ${image}"
 docker build \
+  --platform "linux/amd64" \
   --build-arg "VERSION=${version}" \
   --build-arg "COMMIT=${commit}" \
   --build-arg "BUILD_TIME=${build_time}" \

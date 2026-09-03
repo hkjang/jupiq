@@ -8,9 +8,12 @@ interface AuthContextValue {
   version: VersionInfo
   oidc: OidcConfig
   loading: boolean
+  authError: string
   isAdmin: boolean
   hasPermission: (permission: string) => boolean
   hasAnyPermission: (permissions: string[]) => boolean
+  hasGlobalPermission: (permission: string) => boolean
+  hasAnyGlobalPermission: (permissions: string[]) => boolean
   features: { gpuMonitoring: boolean; llmUsageMonitoring: boolean; approvalWorkflow: boolean }
   setGpuMonitoring: (enabled: boolean) => void
   setLlmUsageMonitoring: (enabled: boolean) => void
@@ -25,7 +28,7 @@ const defaultVersion: VersionInfo = { version: '확인 불가' }
 const defaultOidc: OidcConfig = { enabled: false }
 const AuthContext = createContext<AuthContextValue | null>(null)
 
-function normalizeUser(value: User): User {
+export function normalizeUser(value: User): User {
   const roles = Array.isArray(value.roles)
     ? value.roles
     : typeof value.role === 'string'
@@ -35,6 +38,11 @@ function normalizeUser(value: User): User {
     ...value,
     username: value.username || String(value.email || value.id || '사용자'),
     roles,
+    permissions: Array.isArray(value.permissions) ? value.permissions : [],
+    // Older servers exposed only permissions. Keep that wire compatibility,
+    // while treating an explicitly empty global_permissions array as scoped.
+    global_permissions: Array.isArray(value.global_permissions) ? value.global_permissions : value.permissions || [],
+    scoped_permissions: Array.isArray(value.scoped_permissions) ? value.scoped_permissions : [],
   }
 }
 
@@ -48,6 +56,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [version, setVersion] = useState<VersionInfo>(defaultVersion)
   const [oidc, setOidc] = useState<OidcConfig>(defaultOidc)
   const [loading, setLoading] = useState(true)
+  const [authError, setAuthError] = useState('')
   const [gpuMonitoring, setGpuMonitoring] = useState(false)
   const [llmUsageMonitoring, setLlmUsageMonitoring] = useState(false)
   const [approvalWorkflow, setApprovalWorkflow] = useState(false)
@@ -56,11 +65,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const payload = await request<User | { user?: User }>('/auth/me')
       setUser(normalizeUser(unwrapUser(payload)))
+      setAuthError('')
     } catch (error) {
       if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
         setUser(null)
+        setAuthError('')
         return
       }
+      setAuthError(error instanceof Error ? error.message : '인증 서비스를 확인할 수 없습니다.')
       throw error
     }
   }, [])
@@ -77,9 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (oidcResult.status === 'fulfilled') setOidc({ ...oidcResult.value, enabled: Boolean(oidcResult.value.enabled) })
       try {
         await refreshUser()
-      } catch {
-        setUser(null)
-      } finally {
+      } catch { /* refreshUser가 미인증과 인증 서비스 장애를 구분해 기록합니다. */ } finally {
         if (active) setLoading(false)
       }
     }
@@ -89,13 +99,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refreshFeatures = useCallback(async () => {
     try {
-      const payload = await request<Record<string, unknown>>('/settings')
-      const settings = payload.settings && typeof payload.settings === 'object' ? payload.settings as Record<string, unknown> : payload
-      const features = settings.features && typeof settings.features === 'object' ? settings.features as Record<string, unknown> : settings
-      setGpuMonitoring(Boolean(features.gpu_monitoring ?? features.gpu_monitoring_enabled ?? false))
-      setLlmUsageMonitoring(Boolean(features.llm_usage_monitoring ?? features.llm_usage_monitoring_enabled ?? false))
-      const workflow = settings.workflow && typeof settings.workflow === 'object' ? settings.workflow as Record<string, unknown> : {}
-      setApprovalWorkflow(Boolean(features.approval_workflow ?? workflow.approval_enabled ?? false))
+      const features = await request<Record<string, unknown>>('/features')
+      setGpuMonitoring(Boolean(features.gpu_monitoring))
+      setLlmUsageMonitoring(Boolean(features.llm_usage_monitoring))
+      setApprovalWorkflow(Boolean(features.approval_workflow))
     } catch {
       setGpuMonitoring(false)
       setLlmUsageMonitoring(false)
@@ -113,6 +120,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       body: jsonBody({ username, password }),
     })
     const loggedIn = unwrapUser(payload)
+    setAuthError('')
     if (loggedIn?.username || loggedIn?.id) setUser(normalizeUser(loggedIn))
     else await refreshUser()
   }, [refreshUser])
@@ -127,13 +135,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const hasPermission = useCallback((permission: string) => hasGrantedPermission(user?.permissions, permission), [user?.permissions])
   const hasAnyPermission = useCallback((permissions: string[]) => hasAnyGrantedPermission(user?.permissions, permissions), [user?.permissions])
-  const isAdmin = useMemo(() => hasPermission('settings:write'), [hasPermission])
+  const hasGlobalPermission = useCallback((permission: string) => hasGrantedPermission(user?.global_permissions, permission), [user?.global_permissions])
+  const hasAnyGlobalPermission = useCallback((permissions: string[]) => hasAnyGrantedPermission(user?.global_permissions, permissions), [user?.global_permissions])
+  const isAdmin = useMemo(() => hasGlobalPermission('settings:write'), [hasGlobalPermission])
 
   const value = useMemo<AuthContextValue>(() => ({
-    user, version, oidc, loading, isAdmin, hasPermission, hasAnyPermission,
+    user, version, oidc, loading, authError, isAdmin, hasPermission, hasAnyPermission, hasGlobalPermission, hasAnyGlobalPermission,
     features: { gpuMonitoring, llmUsageMonitoring, approvalWorkflow }, setGpuMonitoring, setLlmUsageMonitoring, setApprovalWorkflow, refreshFeatures,
     login, logout, refreshUser,
-  }), [user, version, oidc, loading, isAdmin, hasPermission, hasAnyPermission, gpuMonitoring, llmUsageMonitoring, approvalWorkflow, refreshFeatures, login, logout, refreshUser])
+  }), [user, version, oidc, loading, authError, isAdmin, hasPermission, hasAnyPermission, hasGlobalPermission, hasAnyGlobalPermission, gpuMonitoring, llmUsageMonitoring, approvalWorkflow, refreshFeatures, login, logout, refreshUser])
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 

@@ -1,4 +1,4 @@
-FROM node:22-alpine AS web-build
+FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS web-build
 
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
@@ -6,7 +6,7 @@ RUN npm ci
 COPY web/ ./
 RUN npm run build
 
-FROM golang:1.26.7-alpine AS go-build
+FROM golang:1.26.7-alpine@sha256:28d89ee9cc0ff9fec75c82ca201e6bf7fdf9a679d4b7b24dfa04f2bb766bb468 AS go-build
 
 ARG VERSION=dev
 ARG COMMIT=unknown
@@ -26,7 +26,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
       -X github.com/hkjang/jupiq/internal/version.BuildTime=${BUILD_TIME}" \
     -o /out/jupiq ./cmd/jupiq
 
-FROM alpine:3.22 AS runtime
+FROM alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce AS runtime
 
 ARG VERSION=dev
 ARG COMMIT=unknown

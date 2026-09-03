@@ -1,5 +1,5 @@
 import { CopyOutlined, DeleteOutlined, KeyOutlined, ReloadOutlined, UserOutlined } from '@ant-design/icons'
-import { Alert, App, Button, Card, Col, Descriptions, Flex, Form, Input, Modal, Row, Select, Space, Table, Tabs, Tag, type TableColumnsType } from 'antd'
+import { Alert, App, Button, Card, Col, Descriptions, Flex, Form, Input, InputNumber, Modal, Row, Select, Space, Table, Tabs, Tag, type TableColumnsType } from 'antd'
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { jsonBody, request } from '../api/client'
@@ -12,8 +12,9 @@ import { asText, formatDate, pick, statusTone } from '../utils/format'
 
 export function PersonalPage() {
   const { message, modal } = App.useApp()
-  const { user, refreshUser } = useAuth()
-  const { data: keys, loading, error, reload } = useList<ApiKey>('/keys')
+  const { user, refreshUser, hasGlobalPermission } = useAuth()
+  const canManageKeys = hasGlobalPermission('profile:keys')
+  const { data: keys, loading, error, reload } = useList<ApiKey>(canManageKeys ? '/keys' : '')
   const [params, setParams] = useSearchParams()
   const [profileForm] = Form.useForm<ApiRecord>()
   const [keyForm] = Form.useForm<ApiRecord>()
@@ -147,10 +148,10 @@ export function PersonalPage() {
   return (
     <>
       <PageHeader title="개인화" description="내 프로필과 서비스 API 키를 서비스 관리자 설정과 분리해 관리합니다." />
-      <Tabs activeKey={params.get('tab') || 'profile'} onChange={(tab) => setParams({ tab })} items={[{ key: 'profile', label: '내 프로필', children: profileTab }, { key: 'keys', label: 'API 키·회전', children: keysTab }]} />
-      <Modal title={issuedSecret ? '새 API 키가 발급되었습니다' : '개인 API 키 발급'} open={keyModalOpen} onCancel={() => { setKeyModalOpen(false); setIssuedSecret('') }} footer={issuedSecret ? <Button type="primary" onClick={() => { setKeyModalOpen(false); setIssuedSecret('') }}>안전하게 보관했습니다</Button> : undefined} destroyOnHidden>
+      <Tabs activeKey={canManageKeys && params.get('tab') === 'keys' ? 'keys' : 'profile'} onChange={(tab) => setParams({ tab })} items={[{ key: 'profile', label: '내 프로필', children: profileTab }, ...(canManageKeys ? [{ key: 'keys', label: 'API 키·회전', children: keysTab }] : [])]} />
+      <Modal title={issuedSecret ? '새 API 키가 발급되었습니다' : '개인 API 키 발급'} open={canManageKeys && keyModalOpen} onCancel={() => { setKeyModalOpen(false); setIssuedSecret('') }} footer={issuedSecret ? <Button type="primary" onClick={() => { setKeyModalOpen(false); setIssuedSecret('') }}>안전하게 보관했습니다</Button> : undefined} destroyOnHidden>
         {issuedSecret ? <Space direction="vertical" size={16} style={{ width: '100%' }}><Alert type="warning" showIcon message="이 키는 다시 확인할 수 없습니다" /><Input.TextArea value={issuedSecret} readOnly autoSize={{ minRows: 3, maxRows: 6 }} aria-label="새 API 키" /><Button block icon={<CopyOutlined />} onClick={copySecret}>키 복사</Button></Space>
-          : <Form form={keyForm} layout="vertical" onFinish={issueKey}><Form.Item name="name" label="키 이름" rules={[{ required: true, message: '키 이름을 입력해 주세요.' }]}><Input placeholder="예: 운영 자동화" /></Form.Item><Form.Item name="permissions" label="권한" rules={[{ required: true, message: '권한을 하나 이상 선택해 주세요.' }]}><Select mode="multiple" options={(user?.permissions || []).map((permission) => ({ label: permission, value: permission }))} placeholder="최소 권한 선택" /></Form.Item><Form.Item name="expires_in_days" label="유효기간(일)"><Input type="number" min={1} max={3650} /></Form.Item><Button type="primary" block htmlType="submit" loading={creatingKey}>키 발급</Button></Form>}
+          : <Form form={keyForm} layout="vertical" onFinish={issueKey}><Form.Item name="name" label="키 이름" rules={[{ required: true, message: '키 이름을 입력해 주세요.' }]}><Input placeholder="예: 운영 자동화" /></Form.Item><Form.Item name="permissions" label="권한" rules={[{ required: true, message: '권한을 하나 이상 선택해 주세요.' }]}><Select mode="multiple" options={(user?.permissions || []).map((permission) => ({ label: permission, value: permission }))} placeholder="최소 권한 선택" /></Form.Item><Form.Item name="expires_in_days" label="유효기간(일)"><InputNumber min={1} max={3650} precision={0} style={{ width: '100%' }} /></Form.Item><Button type="primary" block htmlType="submit" loading={creatingKey}>키 발급</Button></Form>}
       </Modal>
     </>
   )

@@ -132,9 +132,15 @@ func newHTTPClient(options HTTPOptions) *http.Client {
 			if _, err := ValidateEndpoint(req.URL.String()); err != nil {
 				return err
 			}
-			if len(via) > 0 && !strings.EqualFold(req.URL.Hostname(), via[len(via)-1].URL.Hostname()) {
-				req.Header.Del("Authorization")
-				req.Header.Del("Cookie")
+			if len(via) > 0 {
+				previous := via[len(via)-1].URL
+				if strings.EqualFold(previous.Scheme, "https") && !strings.EqualFold(req.URL.Scheme, "https") {
+					return errors.New("HTTPS 연동 대상의 HTTP downgrade redirect는 허용되지 않습니다")
+				}
+				if !strings.EqualFold(req.URL.Scheme, previous.Scheme) || !strings.EqualFold(req.URL.Host, previous.Host) {
+					req.Header.Del("Authorization")
+					req.Header.Del("Cookie")
+				}
 			}
 			return nil
 		},
@@ -148,6 +154,10 @@ func SafeHTTPClient(verifyTLS bool, timeout time.Duration) *http.Client {
 }
 
 func doJSON(ctx context.Context, client *http.Client, method, endpoint, token string, body io.Reader, target any, retry bool) (int, http.Header, error) {
+	return doJSONWithAuthScheme(ctx, client, method, endpoint, token, "Bearer", body, target, retry)
+}
+
+func doJSONWithAuthScheme(ctx context.Context, client *http.Client, method, endpoint, token, authScheme string, body io.Reader, target any, retry bool) (int, http.Header, error) {
 	attempts := 1
 	if retry && (method == http.MethodGet || method == http.MethodHead) {
 		attempts = 2
@@ -161,7 +171,7 @@ func doJSON(ctx context.Context, client *http.Client, method, endpoint, token st
 		req.Header.Set("Accept", "application/json")
 		req.Header.Set("User-Agent", "jupiq-control-plane")
 		if token != "" {
-			req.Header.Set("Authorization", "Bearer "+token)
+			req.Header.Set("Authorization", authScheme+" "+token)
 		}
 		resp, err := client.Do(req)
 		if err != nil {

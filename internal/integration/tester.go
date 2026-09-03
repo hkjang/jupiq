@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -69,10 +70,16 @@ func TestConnection(ctx context.Context, req TestRequest) (result TestResult) {
 		verifyTLS = value
 	}
 	client := newHTTPClient(HTTPOptions{VerifyTLS: verifyTLS, Timeout: 10 * time.Second})
+	llmLabelMappings := map[string]string{}
 	firstResponse := true
 	run := func(name, method, endpoint string, body []byte, target any, retry bool) bool {
 		stepStarted := time.Now()
-		status, header, callErr := doJSON(ctx, client, method, endpoint, req.Secret, bytes.NewReader(body), target, retry)
+		authScheme := "Bearer"
+		if req.Type == "jupyterhub" {
+			authScheme = "token"
+		}
+		authSecret := integrationTestAuthSecret(req.Type, req.Secret)
+		status, header, callErr := doJSONWithAuthScheme(ctx, client, method, endpoint, authSecret, authScheme, bytes.NewReader(body), target, retry)
 		latency := time.Since(stepStarted).Milliseconds()
 		if callErr != nil {
 			result.Error = safeConnectionError(callErr)
@@ -133,7 +140,9 @@ func TestConnection(ctx context.Context, req TestRequest) (result TestResult) {
 				result.Checks = append(result.Checks, Check{Name: "Pod 사용자 매핑", Success: false, Detail: result.Error})
 				return result
 			}
-			if _, mappingErr := DecodeLLMLabelMappings(req.Config["label_mappings"]); mappingErr != nil {
+			var mappingErr error
+			llmLabelMappings, mappingErr = DecodeLLMLabelMappings(req.Config["label_mappings"])
+			if mappingErr != nil {
 				result.Error, result.Remediation = mappingErr.Error(), "지원 label을 사용하거나 PromQL에서 pod/path/status/model/hub/network로 별칭을 만드세요."
 				result.Checks = append(result.Checks, Check{Name: "메타데이터 label 매핑", Success: false, Detail: result.Error})
 				return result
@@ -172,6 +181,19 @@ func TestConnection(ctx context.Context, req TestRequest) (result TestResult) {
 			result.Error, result.Remediation = "Prometheus가 성공 상태를 반환하지 않았습니다", "PromQL과 원격 조회 권한을 확인하세요."
 			result.Checks = append(result.Checks, Check{Name: "PromQL 결과", Success: false, Detail: result.Error})
 			return result
+		}
+		if req.Type == "llm_usage" {
+			sampleCount, fields, inspectErr := inspectLLMPrometheusResult(response, llmLabelMappings)
+			if inspectErr != nil {
+				result.Error, result.Remediation = inspectErr.Error(), "calls PromQL이 pod와 path label을 유지하는지, label_mappings가 실제 원격 label과 일치하는지 확인하세요."
+				result.Checks = append(result.Checks, Check{Name: "LLM 메타데이터 샘플", Success: false, Detail: result.Error})
+				return result
+			}
+			if sampleCount == 0 {
+				result.Checks = append(result.Checks, Check{Name: "LLM 메타데이터 샘플", Success: true, Detail: "PromQL 쿼리 성공 / 현재 샘플 없음(실제 Pod·path 귀속은 미검증)"})
+			} else {
+				result.Checks = append(result.Checks, Check{Name: "LLM 메타데이터 샘플", Success: true, Detail: fmt.Sprintf("%d개 샘플에서 canonical label 확인: %s", sampleCount, strings.Join(fields, ", "))})
+			}
 		}
 	case "kubernetes":
 		versionURL, ok := join("version")
@@ -243,6 +265,62 @@ func TestConnection(ctx context.Context, req TestRequest) (result TestResult) {
 	}
 	result.Success = true
 	return result
+}
+
+func integrationTestAuthSecret(kind, secret string) string {
+	if kind == "oidc" {
+		// Discovery is a public issuer metadata request. A client secret is
+		// valid only at the token endpoint and must never be exposed here.
+		return ""
+	}
+	return secret
+}
+
+func inspectLLMPrometheusResult(response map[string]any, mappings map[string]string) (int, []string, error) {
+	data, ok := response["data"].(map[string]any)
+	if !ok {
+		return 0, nil, errors.New("Prometheus 응답에 data 객체가 없습니다")
+	}
+	results, ok := data["result"].([]any)
+	if !ok {
+		return 0, nil, errors.New("Prometheus 응답의 vector result 형식이 올바르지 않습니다")
+	}
+	present := map[string]bool{}
+	for index, rawResult := range results {
+		result, ok := rawResult.(map[string]any)
+		if !ok {
+			return 0, nil, fmt.Errorf("Prometheus 샘플 %d 형식이 올바르지 않습니다", index+1)
+		}
+		metric, ok := result["metric"].(map[string]any)
+		if !ok {
+			return 0, nil, fmt.Errorf("Prometheus 샘플 %d에 metric label이 없습니다", index+1)
+		}
+		canonical := map[string]string{}
+		for label := range llmCanonicalLabels {
+			if value, ok := metric[label].(string); ok && strings.TrimSpace(value) != "" {
+				canonical[label] = value
+				present[label] = true
+			}
+		}
+		for label, remote := range mappings {
+			if value, ok := metric[remote].(string); ok && strings.TrimSpace(value) != "" {
+				canonical[label] = value
+				present[label] = true
+			}
+		}
+		for _, required := range []string{"pod", "path"} {
+			if canonical[required] == "" {
+				return 0, nil, fmt.Errorf("Prometheus 샘플 %d에 canonical %s label이 없습니다", index+1, required)
+			}
+		}
+	}
+	fields := []string{}
+	for _, field := range []string{"pod", "path", "status", "model", "hub", "network"} {
+		if present[field] {
+			fields = append(fields, field)
+		}
+	}
+	return len(results), fields, nil
 }
 
 func extractVersion(payload map[string]any) string {

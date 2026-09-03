@@ -1,10 +1,12 @@
 openapi: 3.1.0
 info:
   title: jupiq Control Plane API
-  version: 1.0.0
+  version: 1.1.0
   description: >-
     오프라인망 JupyterHub 통합 운영, 사용량, 정책, 승인, AI 및 MCP API.
     성공 응답은 기본적으로 data 필드를 사용하며 목록은 meta 페이지 정보를 포함한다.
+    객체 범위 역할은 Hub 목록·상세·변경·삭제·테스트·동기화, 통합 사용자 목록,
+    서버 목록·제어에만 적용된다. 그 밖의 관리·통계·검색·MCP API는 전역 권한이 필요하다.
 servers:
   - url: /api/v1
 security:
@@ -80,7 +82,6 @@ paths:
               properties:
                 display_name: { type: string }
                 email: { type: string, format: email }
-                department: { type: string }
       responses:
         '200': { $ref: '#/components/responses/Success' }
   /auth/oidc/config:
@@ -97,6 +98,23 @@ paths:
       operationId: startOIDCLogin
       responses:
         '302': { description: Keycloak authorization endpoint로 이동 }
+  /features:
+    get:
+      tags: [Operations]
+      operationId: getFeatureStatus
+      description: 인증 사용자 메뉴 구성에 필요한 전역 기능 활성 상태만 반환한다.
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+  /search:
+    get:
+      tags: [Operations]
+      operationId: globalSearch
+      description: 전역 조회 권한이 있는 리소스만 검색한다. 객체 범위 권한은 검색 결과로 확장되지 않는다.
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string, minLength: 2, maxLength: 100 } }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '400': { $ref: '#/components/responses/Error' }
   /dashboard:
     get:
       tags: [Operations]
@@ -142,6 +160,11 @@ paths:
     get:
       tags: [Operations]
       operationId: streamLLMUsage
+      parameters:
+        - { name: range, in: query, schema: { type: string, enum: [day, week, month] } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: group_by, in: query, schema: { type: string, enum: [user, pod, model, detail] } }
       responses:
         '200':
           description: 실시간 SSE data 이벤트
@@ -150,11 +173,15 @@ paths:
     get:
       tags: [Administration]
       operationId: listHubs
+      description: 전역 hubs:read 또는 할당된 Hub 범위만 반환한다.
+      x-access-scope: global-or-hub
       responses:
         '200': { $ref: '#/components/responses/Success' }
     post:
       tags: [Administration]
       operationId: createHub
+      description: 새 객체에는 기존 범위를 적용할 수 없으므로 전역 hubs:write가 필요하다.
+      x-access-scope: global-only
       requestBody:
         required: true
         content:
@@ -167,9 +194,11 @@ paths:
       - { $ref: '#/components/parameters/ID' }
     get:
       operationId: getHub
+      x-access-scope: global-or-target-hub
       responses: { '200': { $ref: '#/components/responses/Success' } }
     put:
       operationId: updateHub
+      x-access-scope: global-or-target-hub
       requestBody:
         content:
           application/json:
@@ -177,22 +206,54 @@ paths:
       responses: { '200': { $ref: '#/components/responses/Success' } }
     delete:
       operationId: deleteHub
+      x-access-scope: global-or-target-hub
       responses: { '204': { description: 삭제 완료 } }
   /hubs/{id}/test:
     post:
       parameters: [{ $ref: '#/components/parameters/ID' }]
       operationId: testHub
+      x-access-scope: global-or-target-hub
       responses: { '200': { $ref: '#/components/responses/Success' } }
   /hubs/{id}/sync:
     post:
       parameters: [{ $ref: '#/components/parameters/ID' }]
       operationId: syncHub
+      x-access-scope: global-or-target-hub
       responses: { '200': { $ref: '#/components/responses/Success' } }
   /users:
     get:
       tags: [Operations]
       operationId: listHubUsers
-      responses: { '200': { $ref: '#/components/responses/List' } }
+      summary: Hub별 통합 사용자와 현재 실행 자원 조회
+      description: >-
+        JupyterHub 원본 응답에서 허용된 roles만 노출하고, 현재 실행 서버의 상태·개수·
+        총 실행시간·CPU·RAM 및 가장 최근 활동 시각을 Hub별 사용자 행으로 집계한다.
+      x-required-permission: users:read
+      x-access-scope: global-or-hub-and-department
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: page_size, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: hub_id, in: query, schema: { type: integer, format: int64, minimum: 1 } }
+        - { name: search, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: 통합 사용자 목록
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/ManagedHubUser' }
+                  meta:
+                    type: object
+                    required: [page, page_size, total]
+                    properties:
+                      page: { type: integer }
+                      page_size: { type: integer }
+                      total: { type: integer }
   /users/{username}:
     get:
       tags: [Operations]
@@ -203,6 +264,7 @@ paths:
         일·주·월 사용량 및 선택적 LLM 사용 메타데이터를 조회한다.
         Notebook 코드, 셀 출력, AI prompt/response 본문은 수집하거나 반환하지 않는다.
       x-required-permission: users:read
+      x-access-scope: global-only
       parameters:
         - name: username
           in: path
@@ -234,7 +296,18 @@ paths:
     get:
       tags: [Administration]
       operationId: listServiceUsers
-      responses: { '200': { $ref: '#/components/responses/List' } }
+      x-access-scope: global-only
+      responses:
+        '200':
+          description: 서비스 계정과 역할 binding 목록
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/ServiceUser' } }
+                  meta: { type: object, additionalProperties: true }
   /local-users/{id}/roles:
     put:
       tags: [Administration]
@@ -245,10 +318,32 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [role_ids]
-              properties: { role_ids: { type: array, items: { type: integer, format: int64 } } }
-      responses: { '200': { $ref: '#/components/responses/Success' } }
+              oneOf:
+                - type: object
+                  required: [bindings]
+                  properties:
+                    bindings:
+                      type: array
+                      maxItems: 64
+                      items: { $ref: '#/components/schemas/RoleBindingWrite' }
+                - type: object
+                  deprecated: true
+                  description: 기존 global 할당 전용. 제한 binding이 있으면 409로 거부된다.
+                  required: [role_ids]
+                  properties:
+                    role_ids: { type: array, maxItems: 64, items: { type: integer, format: int64 } }
+      responses:
+        '200':
+          description: 갱신된 서비스 계정
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/ServiceUser' }
+        '400': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
   /roles:
     get:
       tags: [Administration]
@@ -275,11 +370,14 @@ paths:
     get:
       tags: [Operations]
       operationId: listServers
+      description: 전역 servers:read 또는 Hub·부서 범위 교집합의 행만 SQL pagination 전에 반환한다.
+      x-access-scope: global-or-hub-and-department
       responses: { '200': { $ref: '#/components/responses/List' } }
   /servers/{id}/{action}:
     post:
       tags: [Operations]
       operationId: controlServer
+      x-access-scope: global-or-target-hub-and-department
       parameters:
         - { $ref: '#/components/parameters/ID' }
         - { name: action, in: path, required: true, schema: { type: string, enum: [start, stop, restart] } }
@@ -331,6 +429,12 @@ paths:
     post:
       tags: [Administration]
       operationId: testIntegration
+      description: >-
+        현재 요청의 설정값을 저장하지 않고 외부 연결을 검증한다. jupyterhub는
+        hubs:write 권한이 필요하고, config.hub_id와 빈 secret을 전달하면 해당 Hub에
+        저장된 암호화 token을 사용하되 저장된 base_url·verify_tls와 정확히 결합한다.
+        대상 또는 TLS 설정이 바뀌면 secret을 다시 제출해야 한다. 다른 연동 유형은
+        settings:write 권한이 필요하며 저장 secret 재사용에도 같은 대상 결합 규칙을 적용한다.
       requestBody:
         required: true
         content:
@@ -340,7 +444,10 @@ paths:
               required: [type, config]
               properties:
                 type: { type: string, enum: [oidc, jupyterhub, prometheus, kubernetes, ai, webhook, llm_usage] }
-                config: { type: object, additionalProperties: true }
+                config:
+                  type: object
+                  additionalProperties: true
+                  description: jupyterhub 편집 preflight에서는 선택적으로 hub_id를 포함한다.
                 secret: { type: string, writeOnly: true }
       responses: { '200': { $ref: '#/components/responses/Success' } }
   /audit:
@@ -534,17 +641,80 @@ components:
               data: { type: object, additionalProperties: true }
             additionalProperties: true
   schemas:
+    ScopeClause:
+      type: object
+      required: [type, value]
+      properties:
+        type: { type: string, enum: [hub, department] }
+        value: { type: string, minLength: 1, maxLength: 256, description: hub은 양의 정수 ID, department는 정확한 부서명 }
+    RoleBindingWrite:
+      type: object
+      required: [role_id, scope_mode, scopes]
+      properties:
+        role_id: { type: integer, format: int64, minimum: 1 }
+        scope_mode: { type: string, enum: [global, restricted] }
+        scopes:
+          type: array
+          maxItems: 128
+          items: { $ref: '#/components/schemas/ScopeClause' }
+          description: global이면 비어 있어야 하고 restricted이면 하나 이상 필요하다. Hub와 부서는 AND, 같은 유형 값은 OR이다.
+    RoleBinding:
+      allOf:
+        - { $ref: '#/components/schemas/RoleBindingWrite' }
+        - type: object
+          required: [role_key, role_name, permissions]
+          properties:
+            role_key: { type: string }
+            role_name: { type: string }
+            permissions: { type: array, items: { type: string } }
+    ServiceUser:
+      type: object
+      required: [id, username, active, roles, permissions, global_permissions, scoped_permissions, role_bindings]
+      properties:
+        id: { type: integer, format: int64 }
+        username: { type: string }
+        display_name: { type: string }
+        email: { type: string }
+        department: { type: string }
+        auth_source: { type: string, enum: [local, oidc] }
+        active: { type: boolean }
+        roles: { type: array, items: { type: string } }
+        permissions: { type: array, items: { type: string }, description: 전역 및 제한 permission의 UI용 합집합 }
+        global_permissions: { type: array, items: { type: string } }
+        scoped_permissions: { type: array, items: { type: string } }
+        role_bindings: { type: array, items: { $ref: '#/components/schemas/RoleBinding' } }
     HubWrite:
       type: object
-      required: [name, base_url]
+      required: [name, base_url, network]
       properties:
-        name: { type: string }
-        base_url: { type: string, format: uri }
-        network: { type: string }
+        name: { type: string, minLength: 1, maxLength: 256 }
+        base_url: { type: string, format: uri, maxLength: 4096 }
+        network: { type: string, minLength: 1, maxLength: 256 }
         enabled: { type: boolean }
         verify_tls: { type: boolean, default: true }
-        collect_interval_seconds: { type: integer, minimum: 30, maximum: 86400 }
-        api_token: { type: string, writeOnly: true }
+        collect_interval_seconds: { type: integer, minimum: 30, maximum: 3600 }
+        api_token: { type: string, writeOnly: true, maxLength: 65536, description: 새 Hub 등록 시 필수. 편집 시 URL과 TLS 검증 설정이 같으면 생략 가능 }
+    ManagedHubUser:
+      type: object
+      required: [id, hub_id, hub_name, username, display_name, department, admin, active, roles, server_status, server_count, running_server_count, runtime_seconds, synced_at]
+      properties:
+        id: { type: integer, format: int64 }
+        hub_id: { type: integer, format: int64 }
+        hub_name: { type: string }
+        username: { type: string }
+        display_name: { type: string }
+        department: { type: string }
+        admin: { type: boolean }
+        active: { type: boolean }
+        roles: { type: array, items: { type: string }, maxItems: 64 }
+        server_status: { type: string, enum: ['', stopped, starting, pending, active, running] }
+        server_count: { type: integer, format: int64, minimum: 0, description: 중지되지 않은 현재 서버 수 }
+        running_server_count: { type: integer, format: int64, minimum: 0 }
+        runtime_seconds: { type: integer, format: int64, minimum: 0, description: 현재 running 서버 실행시간의 합 }
+        cpu_cores: { type: [number, 'null'], description: 모든 running 서버에서 값이 수집된 경우의 합 }
+        memory_bytes: { type: [integer, 'null'], format: int64, description: 모든 running 서버에서 값이 수집된 경우의 합 }
+        last_activity_at: { type: [string, 'null'], format: date-time }
+        synced_at: { type: string, format: date-time }
     Error:
       type: object
       required: [error]

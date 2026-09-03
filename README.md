@@ -7,7 +7,7 @@
 
 **jupiq**는 분리된 JupyterHub와 Kubernetes·Prometheus·GPU 인프라를 한 화면에서 운영하는 오프라인망용 AI Workspace Control Plane입니다.
 
-- 현재 활성 사용자, 실행 서버와 자원 사용량을 망·부서·사용자별로 조회
+- 최신 JupyterHub snapshot에서 실행 서버가 있는 사용자 수와 자원 사용량을 망·부서·사용자별로 조회
 - Fresh·Stale 상태와 마지막 수집 시각 표시
 - 일·주·월 이용 통계와 전체 → 망 → 부서 → 사용자 → 세션 드릴다운
 - JupyterHub 사용자·서버 통합 관리와 정책·Quota·감사
@@ -35,20 +35,23 @@
 릴리스의 서비스 이미지는 다음 규칙을 따릅니다.
 
 ```text
-Docker image   jupiq:v1.0.0
-Release asset  jupiq-v1.0.0.tar.gz
+Docker image   jupiq:v1.1.0
+Release asset  jupiq-v1.1.0.tar.gz
 ```
 
 ```bash
-gzip -t jupiq-v1.0.0.tar.gz
-gzip -dc jupiq-v1.0.0.tar.gz | docker load
+# GitHub Release 본문의 64자리 SHA-256을 승인 기록과 대조
+JUPIQ_ARCHIVE_SHA256='릴리스-본문의-SHA256'
+printf '%s  %s\n' "${JUPIQ_ARCHIVE_SHA256}" jupiq-v1.1.0.tar.gz | sha256sum -c -
+gzip -t jupiq-v1.1.0.tar.gz
+gzip -dc jupiq-v1.1.0.tar.gz | docker load
 # 소스 체크아웃에서는 .env.example을 복사하고 네 값을 안전하게 변경
 cp .env.example .env
 docker run -d --name jupiq --restart unless-stopped --init \
   --env-file .env -p 127.0.0.1:8080:8080 \
   --read-only --tmpfs /tmp:size=64m,mode=1777 \
   --cap-drop ALL --security-opt no-new-privileges:true \
-  jupiq:v1.0.0
+  jupiq:v1.1.0
 curl --fail http://127.0.0.1:8080/readyz
 ```
 
@@ -71,7 +74,7 @@ jupiq 프로세스가 읽는 설정 환경변수는 정확히 네 개입니다.
 openssl rand -base64 32
 ```
 
-Keycloak, JupyterHub, Prometheus, Kubernetes, AI Provider, Webhook 등 나머지 운영 설정은 관리자 페이지에서 입력하고, 저장 전에 TLS·버전·인증·권한·응답시간을 연결 테스트합니다. 비밀값은 `ENCRYPTION_KEY`로 암호화해 PostgreSQL에 저장합니다.
+Keycloak, Prometheus, Kubernetes, AI Provider, Webhook은 관리자 설정에서, JupyterHub는 전용 Hub 등록 Drawer에서 입력합니다. 저장 전에 현재 입력값으로 URL·TLS·응답시간과 연동별 실제 API(예: Hub/Kubernetes 버전·조회 권한, OIDC Discovery, AI 모델 조회)를 검사합니다. 비밀값은 `ENCRYPTION_KEY`로 암호화해 PostgreSQL에 저장합니다.
 
 ## 소스 빌드
 
@@ -129,7 +132,7 @@ GPU와 LLM Chat Completions 모니터링은 초기 **OFF**입니다.
 
 - OFF: 관련 collector·Prometheus query·메뉴·KPI 비활성, 과거 데이터 보존
 - GPU ON: Prometheus와 NVIDIA DCGM Exporter, Pod→사용자 매핑 검증 필요
-- LLM ON: Gateway/Service Mesh가 Prometheus로 노출한 pod/path/status와 calls counter가 필요하며 token metric은 선택
+- LLM ON: Gateway/Service Mesh가 Prometheus로 노출한 pod/path/status와 calls counter가 필요하며 token metric은 선택. 정규식 통과 후 현재 서버 인벤토리의 정확한 Pod 이름과 일치한 샘플만 사용자에게 귀속
 - Notebook 코드, 프롬프트와 응답 본문은 수집하지 않음
 - 선택 collector 실패는 로그인·Hub 관리 등 핵심 서비스에 영향 없음
 
@@ -150,9 +153,9 @@ GPU와 LLM Chat Completions 모니터링은 초기 **OFF**입니다.
 - Notebook source, cell, 사용자 파일, AI prompt/response 본문을 수집하지 않습니다.
 - Hub token, OIDC client secret, AI key는 평문으로 다시 표시하지 않습니다.
 - 위험 작업은 대상·사유 재확인과 감사로그를 남깁니다.
-- 팀장 검토/승인은 관리자가 범위별로 설정한 경우에만 활성화됩니다.
+- 팀장 검토/승인은 관리자가 범위별로 설정한 경우에만 활성화되며, 요청자는 자기 요청을 검토·승인·반려할 수 없고 선검토 시 검토자와 승인자도 분리됩니다.
 
-취약점이나 민감한 보안 문제는 공개 Issue에 secret·내부 URL·로그를 첨부하지 마세요.
+취약점이나 민감한 보안 문제는 공개 Issue에 secret·내부 URL·로그를 첨부하지 마세요. 지원 범위와 비공개 제보 절차는 [보안 정책](SECURITY.md)을 따릅니다.
 
 ## 라이선스
 

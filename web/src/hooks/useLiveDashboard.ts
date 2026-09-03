@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { apiUrl, request } from '../api/client'
+import { useAuth } from '../auth/AuthContext'
 import type { DashboardData } from '../types'
+import { hasStaleLiveSessions } from '../utils/dashboard'
 import { buildUsageOverlay, usageQuery } from '../utils/usage'
 
 export type LiveConnection = '연결 중' | '실시간' | '주기 조회' | '연결 끊김'
@@ -26,6 +28,8 @@ function normalize(payload: unknown): DashboardData | null {
 }
 
 export function useLiveDashboard(filters: DashboardFilters) {
+  const { hasGlobalPermission } = useAuth()
+  const canReadUsage = hasGlobalPermission('usage:read')
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<Error | null>(null)
@@ -33,28 +37,40 @@ export function useLiveDashboard(filters: DashboardFilters) {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const [now, setNow] = useState(Date.now())
   const generation = useRef(0)
+  const requestSequence = useRef(0)
   const usageOverlay = useRef<Record<string, unknown>>({})
   const filterKey = useMemo(() => JSON.stringify(filters), [filters])
 
   const load = useCallback(async (quiet = false) => {
+    const requestID = ++requestSequence.current
     if (!quiet) setLoading(true)
     try {
-      const [next, usage] = await Promise.all([
-        request<DashboardData>(makePath(filters)),
-        request<Record<string, unknown>>(usageQuery(filters).path),
-      ])
-      usageOverlay.current = buildUsageOverlay(usage, filters)
+      const next = await request<DashboardData>(makePath(filters))
+      let nextUsageOverlay: Record<string, unknown> = {}
+      if (canReadUsage) {
+        try {
+          const usage = await request<Record<string, unknown>>(usageQuery(filters).path)
+          nextUsageOverlay = buildUsageOverlay(usage, filters)
+        } catch {
+          nextUsageOverlay = { ...usageOverlay.current, usage_stale: true }
+        }
+      }
+      if (requestID !== requestSequence.current) return false
+      usageOverlay.current = nextUsageOverlay
       setData({ ...next, ...usageOverlay.current })
       setError(null)
       setLastUpdated(new Date())
+      setLoading(false)
       return true
     } catch (caught) {
+      if (requestID !== requestSequence.current) return false
       setError(caught instanceof Error ? caught : new Error('대시보드를 불러오지 못했습니다.'))
+      setLoading(false)
       return false
     } finally {
-      if (!quiet) setLoading(false)
+      if (!quiet && requestID === requestSequence.current) setLoading(false)
     }
-  }, [filterKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [filterKey, canReadUsage]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 5000)
@@ -67,10 +83,13 @@ export function useLiveDashboard(filters: DashboardFilters) {
     let eventSource: EventSource | null = null
     let pollTimer: number | null = null
     let retryTimer: number | null = null
+    let overlayTimer: number | null = null
     let pollingStarted = false
     setConnection('연결 중')
     setLoading(true)
     setError(null)
+    setData(null)
+    setLastUpdated(null)
     usageOverlay.current = {}
 
     const poll = async () => {
@@ -91,7 +110,6 @@ export function useLiveDashboard(filters: DashboardFilters) {
         if (current !== generation.current) return
         setConnection('실시간')
         setError(null)
-        setLoading(false)
       }
       eventSource.onmessage = (event) => {
         if (current !== generation.current) return
@@ -104,6 +122,7 @@ export function useLiveDashboard(filters: DashboardFilters) {
           setLoading(false)
         } catch {
           setError(new Error('실시간 데이터 형식이 올바르지 않습니다.'))
+          setLoading(false)
         }
       }
       eventSource.onerror = () => {
@@ -121,16 +140,18 @@ export function useLiveDashboard(filters: DashboardFilters) {
       }
     }
     void load(true)
+    overlayTimer = window.setInterval(() => void load(true), 60000)
     connect()
     return () => {
       eventSource?.close()
       if (pollTimer) window.clearInterval(pollTimer)
       if (retryTimer) window.clearTimeout(retryTimer)
+      if (overlayTimer) window.clearInterval(overlayTimer)
     }
   }, [filterKey, load]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const transportStale = Boolean(lastUpdated && now - lastUpdated.getTime() > 45000)
-  const sourceStale = Boolean(data?.stale)
+  const sourceStale = Boolean(data?.stale || data?.usage_stale || hasStaleLiveSessions(data?.live_users ?? data?.sessions))
   return {
     data,
     loading,

@@ -37,9 +37,84 @@ type Principal struct {
 }
 
 func (p Principal) Allows(permission string) bool {
-	if !store.EnsurePermission(p.UserPermissions, permission) {
+	if !store.EnsurePermission(p.globalPermissions(), permission) {
 		return false
 	}
+	return p.apiKeyAllows(permission)
+}
+
+// AccessFilter returns the intersection of the user's global/scoped grants and
+// an API key's permission scopes. Unsupported endpoints continue to call
+// Allows, so a restricted grant cannot accidentally become global access.
+func (p Principal) AccessFilter(permission string) store.AccessFilter {
+	if !p.apiKeyAllows(permission) {
+		return store.AccessFilter{}
+	}
+	if store.EnsurePermission(p.globalPermissions(), permission) {
+		return store.AccessFilter{Global: true}
+	}
+	filter := store.AccessFilter{Groups: []store.ScopeGroup{}}
+	for _, grant := range p.User.PermissionGrants {
+		if !store.EnsurePermission(grant.Permissions, permission) {
+			continue
+		}
+		if len(grant.HubIDs) == 0 && len(grant.Departments) == 0 {
+			continue
+		}
+		filter.Groups = append(filter.Groups, store.ScopeGroup{HubIDs: append([]int64(nil), grant.HubIDs...), Departments: append([]string(nil), grant.Departments...)})
+	}
+	return filter
+}
+
+func (p Principal) AllowsTarget(permission string, hubID int64, department string) bool {
+	filter := p.AccessFilter(permission)
+	if filter.Global {
+		return true
+	}
+	for _, group := range filter.Groups {
+		if len(group.HubIDs) > 0 {
+			matched := false
+			for _, allowedHubID := range group.HubIDs {
+				if hubID > 0 && allowedHubID == hubID {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
+		}
+		if len(group.Departments) > 0 {
+			matched := false
+			for _, allowedDepartment := range group.Departments {
+				if department != "" && strings.EqualFold(strings.TrimSpace(allowedDepartment), strings.TrimSpace(department)) {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
+		}
+		return true
+	}
+	return false
+}
+
+func (p Principal) globalPermissions() []string {
+	if p.User.GlobalPermissions != nil {
+		return p.User.GlobalPermissions
+	}
+	// Compatibility for callers/tests constructing Principal directly. Store
+	// hydrated users always carry a non-nil GlobalPermissions slice.
+	return p.UserPermissions
+}
+
+func (p Principal) GlobalPermissionSet() []string {
+	return append([]string(nil), p.globalPermissions()...)
+}
+
+func (p Principal) apiKeyAllows(permission string) bool {
 	if p.APIKeyID == 0 {
 		return true
 	}

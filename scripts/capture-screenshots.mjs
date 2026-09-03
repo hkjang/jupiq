@@ -157,14 +157,14 @@ function demoDashboard() {
     stale: false,
     summary: { active_users: 3, running_servers: 3, cpu_cores: 7.8, memory_bytes: 42 * gib, idle_sessions: 1, long_running_sessions: 1, gpu_count: 0 },
     hubs: [
-      { id: 1, name: '업무망 Hub', network: '업무망', status: 'online', active_users: 2, running_servers: 2, last_success_at: '2026-09-02T10:29:50+09:00' },
-      { id: 2, name: '개발망 Hub', network: '개발망', status: 'online', active_users: 1, running_servers: 1, last_success_at: '2026-09-02T10:29:46+09:00' },
-      { id: 3, name: '분석망 Hub', network: '분석망', status: 'online', active_users: 0, running_servers: 0, last_success_at: '2026-09-02T10:29:42+09:00' },
+      { id: 1, name: '업무망 Hub', network: '업무망', status: 'online', active_users: 2, running_servers: 2, last_success_at: '2026-09-02T10:29:50+09:00', stale: false },
+      { id: 2, name: '개발망 Hub', network: '개발망', status: 'online', active_users: 1, running_servers: 1, last_success_at: '2026-09-02T10:29:46+09:00', stale: false },
+      { id: 3, name: '분석망 Hub', network: '분석망', status: 'online', active_users: 0, running_servers: 0, last_success_at: '2026-09-02T10:29:42+09:00', stale: false },
     ],
     live_users: [
-      { id: 1, username: 'user01', display_name: '김하늘', network: '업무망', hub_name: '업무망 Hub', department: 'AI 플랫폼팀', project_name: 'RAG 고도화', runtime_seconds: 11220, cpu_cores: 3.2, memory_bytes: 18 * gib, status: 'running' },
-      { id: 2, username: 'user02', display_name: '이도윤', network: '업무망', hub_name: '업무망 Hub', department: '데이터 분석팀', project_name: '수요 예측', runtime_seconds: 6840, cpu_cores: 2.8, memory_bytes: 15 * gib, status: 'running' },
-      { id: 3, username: 'user03', display_name: '박서연', network: '개발망', hub_name: '개발망 Hub', department: 'AI 연구팀', project_name: '문서 분류', runtime_seconds: 3960, cpu_cores: 1.8, memory_bytes: 9 * gib, status: 'running' },
+      { id: 1, server_id: 101, hub_id: 1, username: 'user01', display_name: '김하늘', network: '업무망', hub_name: '업무망 Hub', department: 'AI 플랫폼팀', project_name: 'RAG 고도화', runtime_seconds: 11220, cpu_cores: 3.2, memory_bytes: 18 * gib, status: 'running', stale: false, resource_stale: false, data_freshness: '2026-09-02T10:29:50+09:00', resource_sampled_at: '2026-09-02T10:29:40+09:00' },
+      { id: 2, server_id: 102, hub_id: 1, username: 'user02', display_name: '이도윤', network: '업무망', hub_name: '업무망 Hub', department: '데이터 분석팀', project_name: '수요 예측', runtime_seconds: 6840, cpu_cores: 2.8, memory_bytes: 15 * gib, status: 'running', stale: false, resource_stale: false, data_freshness: '2026-09-02T10:29:50+09:00', resource_sampled_at: '2026-09-02T10:29:40+09:00' },
+      { id: 3, server_id: 201, hub_id: 2, username: 'user03', display_name: '박서연', network: '개발망', hub_name: '개발망 Hub', department: 'AI 연구팀', project_name: '문서 분류', runtime_seconds: 3960, cpu_cores: 1.8, memory_bytes: 9 * gib, status: 'running', stale: false, resource_stale: false, data_freshness: '2026-09-02T10:29:46+09:00', resource_sampled_at: '2026-09-02T10:29:38+09:00' },
     ],
     usage_trend: [
       { label: '04시', active_users: 1, running_servers: 2, cpu: 18 },
@@ -212,9 +212,9 @@ function demoLists() {
       { id: 3, name: '분석망 Hub', network: '분석망', base_url: 'https://jupyter-data.example.invalid', status: 'degraded', version: '5.2.1', user_count: 46, running_servers: 9, last_success_at: '2026-09-02T10:24:00+09:00' },
     ],
     users: [
-      { id: 1, username: 'user01', display_name: '김하늘', department: 'AI 플랫폼팀', hub_name: '업무망 Hub', roles: ['User', 'Project Owner'], server_status: 'running', runtime: '3시간 7분', cpu_usage: 44, memory_usage: 57, last_activity: at },
-      { id: 2, username: 'user02', display_name: '이도윤', department: '데이터 분석팀', hub_name: '업무망 Hub', roles: ['User'], server_status: 'running', runtime: '1시간 54분', cpu_usage: 31, memory_usage: 46, last_activity: at },
-      { id: 3, username: 'user03', display_name: '박서연', department: 'AI 연구팀', hub_name: '개발망 Hub', roles: ['User'], server_status: 'stopped', runtime: '—', cpu_usage: 0, memory_usage: 0, last_activity: '2026-09-02T09:51:00+09:00' },
+      { id: 1, username: 'user01', display_name: '김하늘', department: 'AI 플랫폼팀', hub_name: '업무망 Hub', roles: ['user', 'project-owner'], server_status: 'running', server_count: 2, running_server_count: 2, runtime_seconds: 11220, cpu_cores: 3.2, memory_bytes: 18 * 1024 ** 3, last_activity_at: at },
+      { id: 2, username: 'user02', display_name: '이도윤', department: '데이터 분석팀', hub_name: '업무망 Hub', roles: ['user'], server_status: 'running', server_count: 1, running_server_count: 1, runtime_seconds: 6840, cpu_cores: 2.8, memory_bytes: 15 * 1024 ** 3, last_activity_at: at },
+      { id: 3, username: 'user03', display_name: '박서연', department: 'AI 연구팀', hub_name: '개발망 Hub', roles: ['user'], server_status: 'stopped', server_count: 1, running_server_count: 0, runtime_seconds: 0, cpu_cores: null, memory_bytes: null, last_activity_at: '2026-09-02T09:51:00+09:00' },
     ],
     servers: [
       { id: 1, username: 'user01', hub_name: '업무망 Hub', status: 'running', profile_name: 'CPU Medium', image: 'jupyter/datascience:v25.09', node_name: 'worker-a1', pod_name: 'jupyter-user01', runtime: '3시간 7분', cpu_usage: 44, memory_usage: 57, started_at: '2026-09-02T07:21:00+09:00' },
@@ -222,8 +222,8 @@ function demoLists() {
       { id: 3, username: 'user03', hub_name: '개발망 Hub', status: 'stopped', profile_name: 'CPU Small', image: 'jupyter/base:v25.09', node_name: '—', pod_name: '—', runtime: '—', cpu_usage: 0, memory_usage: 0 },
     ],
     gpus: [
-      { id: 1, node_name: 'gpu-worker-01', model: 'NVIDIA H100', index: 0, status: 'allocated', utilization: 72, memory_utilization: 61, memory_used: 48 * 1024 ** 3, temperature: 64, username: 'demo-researcher', pod_name: 'jupyter-demo-researcher' },
-      { id: 2, node_name: 'gpu-worker-01', model: 'NVIDIA H100', index: 1, status: 'idle-review', utilization: 4, memory_utilization: 18, memory_used: 14 * 1024 ** 3, temperature: 42, username: 'demo-analyst', pod_name: 'jupyter-demo-analyst' },
+      { id: 1, hub: '개발망 Hub', network: '개발망', node_name: 'gpu-worker-01', gpu_count: 1, gpu_utilization: 72, vram_bytes: 48 * 1024 ** 3, username: 'demo-researcher', pod_name: 'jupyter-demo-researcher', sampled_at: at, stale: false },
+      { id: 2, hub: '개발망 Hub', network: '개발망', node_name: 'gpu-worker-01', gpu_count: 1, gpu_utilization: 4, vram_bytes: 14 * 1024 ** 3, username: 'demo-analyst', pod_name: 'jupyter-demo-analyst', sampled_at: at, stale: false },
     ],
     projects: [
       { id: 1, name: 'RAG 고도화', owner: 'user01', member_count: 12, hubs: ['업무망', '개발망'], cpu_quota: 64, memory_quota_gb: 256, gpu_quota: 0, status: 'active', end_date: '2026-12-31' },
@@ -239,12 +239,12 @@ function demoLists() {
       { id: 3, name: 'CPU Large', description: '대용량 CPU 분석', cpu_limit: 8, memory_gb: 32, gpu_count: 0, storage_gb: 100, image_name: 'PyTorch CPU', enabled: true },
     ],
     images: [
-      { id: 1, name: 'Data Science', image: 'registry.example.invalid/jupyter/datascience', version: 'v25.09', lifecycle: 'production', critical_vulnerabilities: 0, sbom_status: 'ready', default: true, updated_at: at },
-      { id: 2, name: 'PyTorch CPU', image: 'registry.example.invalid/jupyter/pytorch-cpu', version: 'v25.09', lifecycle: 'approved', critical_vulnerabilities: 0, sbom_status: 'ready', default: false, updated_at: at },
+      { id: 1, name: 'Data Science', image: 'registry.example.invalid/jupyter/datascience', version: 'v25.09', lifecycle: 'production', default: true, updated_at: at },
+      { id: 2, name: 'PyTorch CPU', image: 'registry.example.invalid/jupyter/pytorch-cpu', version: 'v25.09', lifecycle: 'approved', default: false, updated_at: at },
     ],
     approvals: [
-      { id: 1, request_no: 'REQ-20260902-014', requester_name: 'user01', request_type: '장시간 실행', summary: '야간 배치 분석 서버 12시간 유지', manager_status: 'approved', status: 'pending', created_at: '2026-09-02T09:42:00+09:00' },
-      { id: 2, request_no: 'REQ-20260902-013', requester_name: 'user03', request_type: 'Storage 증설', summary: '프로젝트 Workspace 50GB 증설', manager_status: 'reviewing', status: 'review', created_at: '2026-09-02T09:15:00+09:00' },
+      { id: 1, request_no: 'REQ-20260902-014', requester_name: 'user01', request_type: 'server_action', action: 'stop', server_id: 18, status: 'pending', created_at: '2026-09-02T09:42:00+09:00' },
+      { id: 2, request_no: 'REQ-20260902-013', requester_name: 'user03', request_type: 'server_action', action: 'restart', server_id: 27, status: 'pending_review', created_at: '2026-09-02T09:15:00+09:00' },
     ],
     incidents: [
       { id: 1, incident_no: 'INC-20260902-001', severity: 'warning', title: '분석망 Hub 수집 지연', hub_name: '분석망 Hub', affected_users: 3, status: 'investigating', started_at: '2026-09-02T10:20:00+09:00' },
@@ -259,8 +259,8 @@ function demoLists() {
       { id: 2, name: '데이터 분석팀', type: '부서', cpu_hours: 612, memory_gb_hours: 2480, gpu_hours: 0, storage_gb_month: 310, estimated_cost: 930000, budget_usage: 47, period: '2026-09' },
     ],
     notifications: [
-      { id: 1, created_at: at, severity: 'warning', title: '수집 지연 감지', message: '분석망 Hub의 마지막 성공 수집이 기준 시간을 초과했습니다.', channel: 'portal', delivery_status: 'delivered' },
-      { id: 2, created_at: '2026-09-02T09:46:00+09:00', severity: 'info', title: '승인 요청 도착', message: '장시간 실행 요청 1건이 검토 대기 중입니다.', channel: 'portal', delivery_status: 'delivered' },
+      { id: 1, created_at: at, severity: 'warning', title: '수집 지연 점검 규칙', message: '분석망 Hub 수집 지연 시 운영자가 확인할 수 있도록 등록한 규칙입니다.', channel: 'portal', delivery_status: 'registered' },
+      { id: 2, created_at: '2026-09-02T09:46:00+09:00', severity: 'info', title: '승인 대기 점검 규칙', message: '서버 작업 승인 대기 건을 확인하기 위한 수동 운영 규칙입니다.', channel: 'portal', delivery_status: 'registered' },
     ],
     keys: [
       { id: 1, name: '운영 대시보드 조회', prefix: 'jqk_demo_7f2a', permissions: ['dashboard:read'], status: 'active', last_used_at: at, expires_at: '2027-03-01T00:00:00+09:00' },
@@ -335,6 +335,21 @@ async function installEmptyListFallbacks(page) {
     const username = match ? decodeURIComponent(match[1]) : 'user01'
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: demoUserDetail(username) }) })
   })
+  await page.route(/\/api\/v1\/search(?:\?.*)?$/, async (route) => {
+    if (route.request().method() !== 'GET') return route.continue()
+    const response = await route.fetch()
+    if (response.ok()) {
+      const body = await response.json().catch(() => null)
+      const current = body?.data?.items ?? body?.items
+      if (Array.isArray(current) && current.length > 0) return route.fulfill({ response })
+    }
+    const items = [
+      { type: 'user', id: 'user01', title: '김하늘', subtitle: 'user01 · AI 플랫폼팀', path: '/users/user01' },
+      { type: 'server', id: '1', title: 'user01', subtitle: '업무망 Hub · jupyter-user01 · running', path: '/servers?search=user01' },
+      { type: 'project', id: '1', title: 'RAG 고도화', subtitle: 'active', path: '/projects?search=RAG%20고도화' },
+    ]
+    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { query: 'user01', items, total: items.length } }) })
+  })
 }
 
 async function dashboardPayload(context, options, mode, range = 'day') {
@@ -352,6 +367,7 @@ async function dashboardPayload(context, options, mode, range = 'day') {
     payload.hubs = payload.hubs.map((hub, index) => ({
       ...hub,
       status: mode === 'stale' ? (index === payload.hubs.length - 1 ? 'degraded' : 'healthy') : 'healthy',
+      stale: mode === 'stale' && index === payload.hubs.length - 1,
       ...(mode === 'stale' ? { last_success_at: index === payload.hubs.length - 1 ? '2026-09-02T08:10:00+09:00' : '2026-09-02T10:20:00+09:00' } : {}),
     }))
   }
@@ -396,6 +412,7 @@ async function writeWebP(page, path) {
   await page.evaluate(() => {
     window.scrollTo(0, 0)
     for (const input of document.querySelectorAll('input[type="password"]')) input.value = ''
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
   })
   const client = await page.context().newCDPSession(page)
   try {
@@ -493,7 +510,11 @@ async function main() {
   let dashboardMock = null
   let originalSettings = null
   const pageErrors = []
+  const consoleErrors = []
   page.on('pageerror', (error) => pageErrors.push(error.message))
+  page.on('console', (message) => {
+    if (message.type() === 'error') consoleErrors.push(message.text())
+  })
 
   await installEmptyListFallbacks(page)
 
@@ -534,6 +555,16 @@ async function main() {
       await page.addStyleTag({ content: '.login-story h1.ant-typography{word-break:keep-all;text-wrap:balance}' })
       await page.evaluate(async () => { if (document.fonts?.ready) await document.fonts.ready })
       await writeWebP(page, resolve(options.output, loginEntry.file))
+      const unexpectedLoginErrors = consoleErrors.filter((message) => !/status of 401 \(Unauthorized\)/.test(message))
+      if (pageErrors.length || unexpectedLoginErrors.length) {
+        throw new Error(`${loginEntry.file} 렌더링 오류: ${[...pageErrors, ...unexpectedLoginErrors].join('; ')}`)
+      }
+      // AuthProvider intentionally probes /auth/me before login. Chromium logs
+      // that expected 401 as a resource error even though the UI handles it.
+      // Clear only the already-vetted login-page diagnostics so authenticated
+      // pages continue to fail on every console or rendering error.
+      pageErrors.length = 0
+      consoleErrors.length = 0
       console.log(`✓ ${loginEntry.file}`)
     }
 
@@ -541,6 +572,8 @@ async function main() {
       if (page.url() !== `${options.baseUrl}/login`) await page.goto(`${options.baseUrl}/login`, { waitUntil: 'domcontentloaded' })
       await login(page, options)
       originalSettings = await readScreenshotFeatureState(page)
+      pageErrors.length = 0
+      consoleErrors.length = 0
     }
 
     for (const entry of entries) {
@@ -555,7 +588,9 @@ async function main() {
       await waitForPage(page)
       await applyCondition(page, entry)
       await page.waitForTimeout(350)
-      if (pageErrors.length) throw new Error(`${entry.file} 렌더링 오류: ${pageErrors.splice(0).join('; ')}`)
+      if (pageErrors.length || consoleErrors.length) {
+        throw new Error(`${entry.file} 렌더링 오류: ${[...pageErrors.splice(0), ...consoleErrors.splice(0)].join('; ')}`)
+      }
       await writeWebP(page, resolve(options.output, entry.file))
       console.log(`✓ ${entry.file}`)
       dashboardMock = null

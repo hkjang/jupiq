@@ -12,6 +12,8 @@ func contextWithTimeout(r *http.Request, timeout time.Duration) (context.Context
 	return context.WithTimeout(r.Context(), timeout)
 }
 
-func contextWithoutCancel(r *http.Request) context.Context { return context.WithoutCancel(r.Context()) }
+func contextWithDetachedTimeout(r *http.Request, timeout time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(r.Context()), timeout)
+}
 
 func (s *Server) versionInfo() version.Info { return version.Get() }

@@ -50,7 +50,7 @@ func (c *JupyterHubClient) Info(ctx context.Context) (HubInfo, error) {
 		return HubInfo{}, err
 	}
 	var info HubInfo
-	_, _, err = doJSON(ctx, c.HTTP, http.MethodGet, endpoint, c.Token, nil, &info, true)
+	_, _, err = doJSONWithAuthScheme(ctx, c.HTTP, http.MethodGet, endpoint, c.Token, "token", nil, &info, true)
 	return info, err
 }
 
@@ -60,14 +60,14 @@ func (c *JupyterHubClient) Users(ctx context.Context) ([]JupyterUser, error) {
 		return nil, err
 	}
 	var raw []json.RawMessage
-	if _, _, err := doJSON(ctx, c.HTTP, http.MethodGet, endpoint, c.Token, nil, &raw, true); err != nil {
+	if _, _, err := doJSONWithAuthScheme(ctx, c.HTTP, http.MethodGet, endpoint, c.Token, "token", nil, &raw, true); err != nil {
 		return nil, err
 	}
 	users := make([]JupyterUser, 0, len(raw))
-	for _, item := range raw {
+	for index, item := range raw {
 		var user JupyterUser
 		if err := json.Unmarshal(item, &user); err != nil {
-			continue
+			return nil, fmt.Errorf("JupyterHub 사용자 응답 %d 해석 실패: %w", index+1, err)
 		}
 		user.Raw = item
 		users = append(users, user)
@@ -86,15 +86,54 @@ func (c *JupyterHubClient) ServerAction(ctx context.Context, username, serverNam
 	}
 	switch action {
 	case "start":
-		_, _, err = doJSON(ctx, c.HTTP, http.MethodPost, endpoint, c.Token, bytes.NewReader([]byte(`{}`)), nil, false)
+		_, _, err = doJSONWithAuthScheme(ctx, c.HTTP, http.MethodPost, endpoint, c.Token, "token", bytes.NewReader([]byte(`{}`)), nil, false)
 	case "stop":
-		_, _, err = doJSON(ctx, c.HTTP, http.MethodDelete, endpoint, c.Token, nil, nil, false)
+		_, _, err = doJSONWithAuthScheme(ctx, c.HTTP, http.MethodDelete, endpoint, c.Token, "token", nil, nil, false)
 	case "restart":
-		if _, _, err = doJSON(ctx, c.HTTP, http.MethodDelete, endpoint, c.Token, nil, nil, false); err == nil {
-			_, _, err = doJSON(ctx, c.HTTP, http.MethodPost, endpoint, c.Token, bytes.NewReader([]byte(`{}`)), nil, false)
+		if _, _, err = doJSONWithAuthScheme(ctx, c.HTTP, http.MethodDelete, endpoint, c.Token, "token", nil, nil, false); err == nil {
+			err = c.waitServerStopped(ctx, username, serverName)
+			if err == nil {
+				_, _, err = doJSONWithAuthScheme(ctx, c.HTTP, http.MethodPost, endpoint, c.Token, "token", bytes.NewReader([]byte(`{}`)), nil, false)
+			}
 		}
 	default:
 		err = fmt.Errorf("unsupported server action %q", action)
 	}
 	return err
+}
+
+func (c *JupyterHubClient) waitServerStopped(ctx context.Context, username, serverName string) error {
+	userEndpoint, err := c.endpoint("users/" + url.PathEscape(username))
+	if err != nil {
+		return err
+	}
+	ticker := time.NewTicker(300 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var user JupyterUser
+		status, _, requestErr := doJSONWithAuthScheme(ctx, c.HTTP, http.MethodGet, userEndpoint, c.Token, "token", nil, &user, false)
+		if status == http.StatusNotFound {
+			return nil
+		}
+		if requestErr != nil {
+			return fmt.Errorf("서버 종료 상태 확인 실패: %w", requestErr)
+		}
+		running := false
+		if serverName == "" {
+			running = user.Server != ""
+			if _, exists := user.Servers[""]; exists {
+				running = true
+			}
+		} else {
+			_, running = user.Servers[serverName]
+		}
+		if !running {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("서버 종료 대기 시간 초과: %w", ctx.Err())
+		case <-ticker.C:
+		}
+	}
 }

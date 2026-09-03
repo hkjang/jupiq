@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -28,14 +29,30 @@ func TestNormalizeLLMLabels(t *testing.T) {
 
 func TestLLMScanCadenceDoesNotOverlapDefaultPromQLWindow(t *testing.T) {
 	c := &Collector{}
-	now := time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
-	if !c.llmScanDue(now) {
+	now := time.Date(2026, 9, 2, 12, 0, 29, 900, time.UTC)
+	scanAt := llmEvaluationTime(now)
+	if !scanAt.Equal(time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)) {
+		t.Fatalf("evaluation time was not aligned to a UTC minute: %s", scanAt)
+	}
+	if !c.llmScanDue(scanAt) {
 		t.Fatal("first scan should run")
 	}
-	if c.llmScanDue(now.Add(30 * time.Second)) {
+	if c.llmScanDue(llmEvaluationTime(now.Add(20 * time.Second))) {
 		t.Fatal("30-second base tick would overlap the one-minute increase window")
 	}
-	if !c.llmScanDue(now.Add(time.Minute)) {
+	if !c.llmScanDue(llmEvaluationTime(now.Add(time.Minute))) {
 		t.Fatal("one-minute counter window should run")
+	}
+}
+
+func TestHealthWriteContextSurvivesProviderCancellation(t *testing.T) {
+	parent, cancelParent := context.WithCancel(context.Background())
+	cancelParent()
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), time.Second)
+	defer cancel()
+	select {
+	case <-ctx.Done():
+		t.Fatalf("independent health context inherited cancellation: %v", ctx.Err())
+	default:
 	}
 }

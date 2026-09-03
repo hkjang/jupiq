@@ -27,9 +27,19 @@ func (s *Server) registerPublic(mux *http.ServeMux) {
 
 func (s *Server) registerAuth(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/auth/me", s.require("", s.me))
-	mux.HandleFunc("PATCH /api/v1/auth/me", s.require("", s.meUpdate))
-	mux.HandleFunc("POST /api/v1/auth/logout", s.require("", s.logout))
-	mux.HandleFunc("POST /api/v1/auth/password", s.require("", s.changePassword))
+	mux.HandleFunc("PATCH /api/v1/auth/me", s.require("", interactiveSessionOnly(s.meUpdate)))
+	mux.HandleFunc("POST /api/v1/auth/logout", s.require("", interactiveSessionOnly(s.logout)))
+	mux.HandleFunc("POST /api/v1/auth/password", s.require("", interactiveSessionOnly(s.changePassword)))
+}
+
+func interactiveSessionOnly(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if principal(r).APIKeyID != 0 {
+			apiError(w, r, http.StatusForbidden, "interactive_session_required", "브라우저 로그인 세션에서만 계정 정보를 변경할 수 있습니다")
+			return
+		}
+		next(w, r)
+	}
 }
 
 func (s *Server) ready(w http.ResponseWriter, r *http.Request) {
@@ -53,6 +63,10 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := decodeJSON(r, &input); err != nil || strings.TrimSpace(input.Username) == "" || input.Password == "" {
 		apiError(w, r, http.StatusBadRequest, "invalid_request", "아이디와 비밀번호를 입력하세요")
+		return
+	}
+	if len(input.Username) > 128 || len(input.Password) > 1024 {
+		apiError(w, r, http.StatusBadRequest, "invalid_request", "아이디 또는 비밀번호 길이가 허용 범위를 초과했습니다")
 		return
 	}
 	ip := clientIP(r)
@@ -83,19 +97,18 @@ func (s *Server) meUpdate(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		DisplayName string `json:"display_name"`
 		Email       string `json:"email"`
-		Department  string `json:"department"`
 	}
 	if err := decodeJSON(r, &input); err != nil {
 		apiError(w, r, http.StatusBadRequest, "invalid_json", err.Error())
 		return
 	}
 	p := principal(r)
-	user, err := s.Store.UpdateProfile(r.Context(), p.User.ID, input.DisplayName, input.Email, input.Department)
+	user, err := s.Store.UpdateProfile(r.Context(), p.User.ID, input.DisplayName, input.Email)
 	if err != nil {
 		handleStoreError(w, r, err)
 		return
 	}
-	_ = s.Store.RecordAudit(r.Context(), requestAudit(r, "profile.update", "user", strconv.FormatInt(user.ID, 10), "success", "", nil, map[string]any{"display_name": user.DisplayName, "email": user.Email, "department": user.Department}))
+	_ = s.Store.RecordAudit(r.Context(), requestAudit(r, "profile.update", "user", strconv.FormatInt(user.ID, 10), "success", "", nil, map[string]any{"display_name": user.DisplayName, "email": user.Email}))
 	data(w, http.StatusOK, map[string]any{"user": user})
 }
 
@@ -145,7 +158,7 @@ func (s *Server) oidcConfig(w http.ResponseWriter, r *http.Request) {
 		handleStoreError(w, r, err)
 		return
 	}
-	data(w, http.StatusOK, map[string]any{"enabled": cfg.Enabled, "issuer_url": cfg.IssuerURL, "client_id": cfg.ClientID, "secret_configured": secretConfigured})
+	data(w, http.StatusOK, map[string]any{"enabled": cfg.Enabled && secretConfigured, "issuer_url": cfg.IssuerURL, "client_id": cfg.ClientID, "secret_configured": secretConfigured})
 }
 
 func (s *Server) oidcLogin(w http.ResponseWriter, r *http.Request) {

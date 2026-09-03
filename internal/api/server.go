@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/hkjang/jupiq/internal/auth"
 	"github.com/hkjang/jupiq/internal/store"
@@ -16,6 +18,9 @@ type Server struct {
 	Auth         *auth.Service
 	Logger       *slog.Logger
 	loginLimiter *loginLimiter
+	liveMu       sync.Mutex
+	liveSnapshot []byte
+	liveCachedAt time.Time
 }
 
 func New(s *store.Store, authService *auth.Service, logger *slog.Logger) *Server {

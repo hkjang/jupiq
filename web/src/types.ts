@@ -21,6 +21,9 @@ export interface User extends ApiRecord {
   department?: string
   roles?: string[]
   permissions?: string[]
+  global_permissions?: string[]
+  scoped_permissions?: string[]
+  role_bindings?: ApiRecord[]
 }
 
 export interface VersionInfo extends ApiRecord {

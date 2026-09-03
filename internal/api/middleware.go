@@ -10,6 +10,7 @@ import (
 
 	"github.com/hkjang/jupiq/internal/auth"
 	"github.com/hkjang/jupiq/internal/secure"
+	"github.com/hkjang/jupiq/internal/store"
 )
 
 func (s *Server) middleware(next http.Handler) http.Handler {
@@ -39,6 +40,23 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func scopedAccess(w http.ResponseWriter, r *http.Request, permission string) (store.AccessFilter, bool) {
+	access := principal(r).AccessFilter(permission)
+	if !access.Global && len(access.Groups) == 0 {
+		apiError(w, r, http.StatusForbidden, "forbidden", "이 작업을 수행할 권한이 없습니다")
+		return store.AccessFilter{}, false
+	}
+	return access, true
+}
+
+func scopedTargetAllowed(w http.ResponseWriter, r *http.Request, permission string, hubID int64, department string) bool {
+	if principal(r).AllowsTarget(permission, hubID, department) {
+		return true
+	}
+	apiError(w, r, http.StatusForbidden, "forbidden", "이 대상에 대한 권한이 없습니다")
+	return false
 }
 
 func (s *Server) require(permission string, next http.HandlerFunc) http.HandlerFunc {
