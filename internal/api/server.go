@@ -58,6 +58,7 @@ func (s *Server) serveSPA(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if info, err := os.Stat(requested); err == nil && !info.IsDir() {
+		w.Header().Set("Cache-Control", staticCacheControl(r.URL.Path))
 		http.ServeFile(w, r, requested)
 		return
 	}
@@ -68,4 +69,17 @@ func (s *Server) serveSPA(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	http.ServeFile(w, r, index)
+}
+
+// staticCacheControl은 SPA 정적 파일의 캐시 정책을 정한다.
+// Vite는 번들 산출물을 전부 content hash가 붙은 이름으로 assets/ 아래에 두므로
+// 내용이 바뀌면 URL도 바뀐다. 따라서 그 파일들만 장기 immutable 캐시가 안전하다.
+// public/에서 그대로 복사되는 favicon 같은 파일은 이름이 고정이라 릴리스마다
+// 내용이 바뀔 수 있으므로, 브라우저 heuristic 캐시로 오래된 파일이 남지 않도록
+// 매번 재검증(If-Modified-Since)하게 한다.
+func staticCacheControl(urlPath string) string {
+	if strings.HasPrefix(urlPath, "/assets/") {
+		return "public, max-age=31536000, immutable"
+	}
+	return "public, max-age=0, must-revalidate"
 }
