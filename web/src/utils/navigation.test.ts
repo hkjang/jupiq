@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { canAccessNavigationPath, canOpenUserDetail, canUseGlobalSearch, firstAccessiblePath, isFeatureMenuVisible, selectedNavigationPath, serviceVersionLabel } from './navigation'
+import { canAccessNavigationPath, canOpenUserDetail, canUseGlobalSearch, firstAccessiblePath, homePath, isFeatureMenuVisible, selectedNavigationPath, serviceVersionLabel } from './navigation'
 
 describe('navigation state', () => {
   it('새로고침된 하위 URL에서 해당 상위 메뉴를 선택한다', () => {
@@ -18,6 +18,14 @@ describe('navigation state', () => {
   it('프로필과 로그인 화면용 버전 라벨을 일관되게 만든다', () => {
     expect(serviceVersionLabel('1.0.0')).toBe('v1.0.0')
     expect(serviceVersionLabel()).toBe('v확인 불가')
+  })
+
+  it('통합 대시보드를 읽을 수 있으면 항상 그 화면으로 보낸다', () => {
+    const features = { gpuMonitoring: false, llmUsageMonitoring: false, approvalWorkflow: false }
+    expect(homePath).toBe('/dashboard')
+    expect(firstAccessiblePath(['dashboard:read'], features)).toBe(homePath)
+    // 다른 화면 권한을 함께 가진 SSO 계정도 대시보드를 먼저 본다.
+    expect(firstAccessiblePath(['servers:read', 'dashboard:read', 'settings:read'], features)).toBe(homePath)
   })
 
   it('역할이 접근할 수 있는 첫 화면을 선택한다', () => {

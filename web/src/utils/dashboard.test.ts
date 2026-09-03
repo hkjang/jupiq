@@ -13,6 +13,18 @@ describe('dashboard live resource view', () => {
     expect(summarizeLiveUsers(filtered)).toMatchObject({ active_users: 1, running_servers: 1, cpu_cores: 1.5, memory_bytes: 1073741824, idle_sessions: 1, long_running_sessions: 1 })
   })
 
+  it('Hub가 보고한 어떤 key로도 같은 선택값을 찾아낸다', () => {
+    const mixed = [
+      { username: 'user01', hub: 3, hub_name: '업무망 Hub', project: 'p-1', project_name: 'RAG 파일럿' },
+      { username: 'user02', hub: 4, hub_name: '개발망 Hub' },
+    ]
+    // 드롭다운은 hub_name으로 만들고 세션은 숫자 hub도 함께 들고 있다.
+    expect(filterLiveUsers(mixed, { hub: '업무망 Hub' }).map((row) => row.username)).toEqual(['user01'])
+    expect(filterLiveUsers(mixed, { hub: '3' }).map((row) => row.username)).toEqual(['user01'])
+    expect(filterLiveUsers(mixed, { project: 'RAG 파일럿' }).map((row) => row.username)).toEqual(['user01'])
+    expect(filterLiveUsers(mixed, { hub: '없는 Hub' })).toEqual([])
+  })
+
   it('backend core와 byte 값을 퍼센트로 오표시하지 않는다', () => {
     expect(formatCpuResource({ cpu_usage: 2.5 })).toBe('2.5 Core')
     expect(formatMemoryResource({ memory_usage: 1073741824 })).toBe('1 GB')

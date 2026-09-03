@@ -38,6 +38,7 @@ function eventError(event: Event) {
 export function useLiveLlmUsage(range: LlmUsageRange) {
   const [data, setData] = useState<ApiRecord | null>(null)
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<Error | null>(null)
   const [streamError, setStreamError] = useState<Error | null>(null)
   const [connection, setConnection] = useState<LlmUsageConnection>('연결 중')
@@ -49,7 +50,8 @@ export function useLiveLlmUsage(range: LlmUsageRange) {
 
   const load = useCallback(async (quiet = false) => {
     const requestID = ++requestSequence.current
-    if (!quiet) setLoading(true)
+    if (quiet || dataRef.current) setRefreshing(true)
+    else setLoading(true)
     try {
       const next = await request<ApiRecord>(llmUsagePath(range))
       if (requestID !== requestSequence.current) return false
@@ -57,13 +59,16 @@ export function useLiveLlmUsage(range: LlmUsageRange) {
       setData(next)
       setError(null)
       setLastUpdated(new Date())
-      setLoading(false)
       return true
     } catch (caught) {
       if (requestID !== requestSequence.current) return false
       setError(caught instanceof Error ? caught : new Error('LLM 사용량을 불러오지 못했습니다.'))
-      setLoading(false)
       return false
+    } finally {
+      if (requestID === requestSequence.current) {
+        setLoading(false)
+        setRefreshing(false)
+      }
     }
   }, [range])
 
@@ -83,13 +88,11 @@ export function useLiveLlmUsage(range: LlmUsageRange) {
     let streamActivityAt = Date.now()
 
     requestSequence.current += 1
-    dataRef.current = null
-    setData(null)
-    setLoading(true)
+    // The previous range stays visible until the new one arrives; blanking it
+    // here made every Segmented click flash an empty panel.
     setError(null)
     setStreamError(null)
     setConnection('연결 중')
-    setLastUpdated(null)
 
     const stopPolling = () => {
       if (pollTimer !== null) window.clearInterval(pollTimer)
@@ -172,7 +175,7 @@ export function useLiveLlmUsage(range: LlmUsageRange) {
 
     if (typeof EventSource === 'undefined') startPolling()
     else {
-      void load(true)
+      void load(Boolean(dataRef.current))
       connect()
     }
     watchdogTimer = window.setInterval(() => {
@@ -196,6 +199,7 @@ export function useLiveLlmUsage(range: LlmUsageRange) {
   return {
     data,
     loading,
+    refreshing,
     error,
     streamError,
     connection,
@@ -203,6 +207,6 @@ export function useLiveLlmUsage(range: LlmUsageRange) {
     stale: transportStale || sourceStale,
     transportStale,
     sourceStale,
-    reload: () => load(false),
+    reload: () => load(Boolean(dataRef.current)),
   }
 }

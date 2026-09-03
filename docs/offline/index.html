@@ -9,8 +9,8 @@
 
 <h2 id="preflight">반입·기동 전 점검표</h2><ul class="checklist"><li>파일명이 정확히 <code>jupiq-vX.Y.Z.tar.gz</code>인지 확인</li><li>Release 본문의 SHA-256과 반입 파일을 대조하고 승인 기록 보관</li><li><code>gzip -t</code> 성공 및 조직 승인 기록 보관</li><li><code>docker load</code> 후 태그가 <code>jupiq:vX.Y.Z</code>인지 확인</li><li>OCI version/revision/created label 기록</li><li>PostgreSQL TLS·계정·용량·백업 상태 확인</li><li>네 환경변수만 전달되고 로그·Compose에 비밀이 노출되지 않는지 확인</li><li>외부 egress 차단 상태에서 <code>/readyz</code> 성공</li><li>로그인 화면과 프로필 메뉴의 버전이 태그와 일치</li></ul>
 <div class="code-block"><code>JUPIQ_ARCHIVE_SHA256='릴리스-본문의-SHA256'
-printf '%s  %s\n' "${JUPIQ_ARCHIVE_SHA256}" jupiq-v1.1.0.tar.gz | sha256sum -c -
-docker image inspect jupiq:v1.1.0 \
+printf '%s  %s\n' "${JUPIQ_ARCHIVE_SHA256}" jupiq-v1.2.0.tar.gz | sha256sum -c -
+docker image inspect jupiq:v1.2.0 \
   --format '{{.RepoTags}} {{index .Config.Labels "org.opencontainers.image.version"}}'
 docker inspect jupiq --format '{{range .Config.Env}}{{println .}}{{end}}'</code></div>
 <div class="callout warning"><p><code>docker inspect jupiq --format '{{range .Config.Env}}...'</code> 명령에는 실제 비밀값이 출력될 수 있습니다. 보안 터미널에서만 실행하고 결과를 티켓이나 채팅에 붙여넣지 마세요. 키 이름 검증 자동화는 값이 아닌 이름만 마스킹해 기록해야 합니다.</p></div>
@@ -27,4 +27,4 @@ docker inspect jupiq --format '{{range .Config.Env}}{{println .}}{{end}}'</code>
 
 <h2 id="runbook">빠른 장애 Runbook</h2><table><thead><tr><th>증상</th><th>확인</th><th>조치</th></tr></thead><tbody><tr><td>컨테이너 재시작 반복</td><td><code>docker logs jupiq</code>, 네 env 존재 여부</td><td>DSN/TLS·키 형식 수정 후 재기동</td></tr><tr><td><code>/healthz</code> 실패</td><td>프로세스·포트·OOM</td><td>컨테이너 상태와 호스트 자원 확인</td></tr><tr><td><code>/readyz</code> 실패</td><td>PostgreSQL DNS·TLS·권한·migration</td><td>DB 연결 복구, 로그의 secret은 공유 금지</td></tr><tr><td>특정 Hub Stale</td><td>연결 테스트의 TLS/버전/인증/권한/지연</td><td>대상만 수정, 다른 Hub 재시작 불필요</td></tr><tr><td>SSO 실패</td><td>issuer·redirect URI·시간 동기화</td><td>Bootstrap 관리자로 진단</td></tr><tr><td>선택 메트릭 오류</td><td>Prometheus query·label·샘플</td><td>기능 OFF 후 핵심 서비스 유지</td></tr></tbody></table>
 </article></div></main>
-<footer class="site-footer"><div class="container"><div class="footer-grid"><div><img class="footer-logo" src="../assets/logo-inverse.svg" alt="jupiq"><p class="small">오프라인망 AI Workspace Control Plane</p></div><div><h3>제품</h3><a href="../features/">기능</a><a href="../security/">보안</a></div><div><h3>가이드</h3><a href="../install/">설치</a><a href="./">오프라인 운영</a><a href="../admin-guide/">관리자</a></div><div><h3>개발자</h3><a href="../api-mcp/">API·MCP</a><a href="../releases/">릴리스</a></div></div><div class="footer-bottom"><span>© <span data-year>2026</span> jupiq contributors</span><span>Version 1.1.0</span></div></div></footer></body></html>
+<footer class="site-footer"><div class="container"><div class="footer-grid"><div><img class="footer-logo" src="../assets/logo-inverse.svg" alt="jupiq"><p class="small">오프라인망 AI Workspace Control Plane</p></div><div><h3>제품</h3><a href="../features/">기능</a><a href="../security/">보안</a></div><div><h3>가이드</h3><a href="../install/">설치</a><a href="./">오프라인 운영</a><a href="../admin-guide/">관리자</a></div><div><h3>개발자</h3><a href="../api-mcp/">API·MCP</a><a href="../releases/">릴리스</a></div></div><div class="footer-bottom"><span>© <span data-year>2026</span> jupiq contributors</span><span>Version 1.2.0</span></div></div></footer></body></html>

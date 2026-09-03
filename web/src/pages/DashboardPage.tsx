@@ -8,9 +8,9 @@ import {
   TeamOutlined,
   WarningOutlined,
 } from '@ant-design/icons'
-import { Alert, Card, Col, Flex, Progress, Row, Segmented, Select, Space, Statistic, Table, Tag, Typography, type TableColumnsType } from 'antd'
+import { Alert, Button, Card, Col, Flex, Progress, Row, Segmented, Select, Space, Statistic, Table, Tag, Typography, type TableColumnsType } from 'antd'
 import type { EChartsOption } from 'echarts'
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { AsyncState } from '../components/AsyncState'
@@ -19,7 +19,7 @@ import { PageHeader } from '../components/PageHeader'
 import { useLiveDashboard, type DashboardFilters } from '../hooks/useLiveDashboard'
 import type { ApiRecord } from '../types'
 import { asNumber, asText, formatBytes, formatDate, formatDuration, pick, statusTone } from '../utils/format'
-import { filterLiveUsers, formatCpuResource, formatGpuResource, formatMemoryResource, formatVramResource, isFreshLiveSession, summarizeLiveUsers } from '../utils/dashboard'
+import { filterLiveUsers, formatCpuResource, formatGpuResource, formatMemoryResource, formatVramResource, isFreshLiveSession, liveSessionFilterKeys, summarizeLiveUsers } from '../utils/dashboard'
 
 function records(value: unknown): ApiRecord[] {
   return Array.isArray(value) ? value.filter((item): item is ApiRecord => Boolean(item) && typeof item === 'object') : []
@@ -33,9 +33,31 @@ function metric(record: ApiRecord, ...keys: string[]) {
   return pick(record, ...keys)
 }
 
-function uniqueOptions(items: ApiRecord[], keys: string[]) {
-  const values = items.map((item) => pick(item, ...keys)).filter((value) => value !== undefined).map(String)
-  return [...new Set(values)].map((value) => ({ label: value, value }))
+// Option values must come from the same keys the filter compares against,
+// otherwise the dropdown offers a label that matches no row. Catalog records
+// (Hub, project) name themselves with `name`; live sessions name their parent
+// with `hub_name`/`project_name`.
+function optionValues(items: ApiRecord[], keys: string[]) {
+  return items.map((item) => pick(item, ...keys)).filter((value) => value !== undefined && value !== null && value !== '').map(String)
+}
+
+function toOptions(values: string[]) {
+  return [...new Set(values)].sort((left, right) => left.localeCompare(right, 'ko-KR')).map((value) => ({ label: value, value }))
+}
+
+// Live updates arrive every few seconds. Rebuilding the filter options on each
+// payload replaced the Select option objects while a dropdown was open, which
+// made the list flash and lose the highlighted entry. Only publish a new option
+// set when the option values themselves changed.
+function useStableOptions(next: FilterOptions): FilterOptions {
+  const previous = useRef<FilterOptions>(next)
+  const signature = JSON.stringify(next)
+  const previousSignature = useRef(signature)
+  if (signature !== previousSignature.current) {
+    previousSignature.current = signature
+    previous.current = next
+  }
+  return previous.current
 }
 
 function chartText(value: unknown) { return asText(value, '') }
@@ -69,13 +91,16 @@ function freshnessStatus(row: ApiRecord) {
   )
 }
 
+interface FilterOption { label: string; value: string }
+interface FilterOptions { network: FilterOption[]; hub: FilterOption[]; department: FilterOption[]; project: FilterOption[] }
+
 export function DashboardPage() {
   const { features, hasGlobalPermission } = useAuth()
   const canReadUsage = hasGlobalPermission('usage:read')
   const canViewUserDetails = hasGlobalPermission('users:read')
   const navigate = useNavigate()
   const [filters, setFilters] = useState<DashboardFilters>({ range: 'day' })
-  const { data, loading, error, connection, lastUpdated, stale, transportStale, sourceStale, reload } = useLiveDashboard(filters)
+  const { data, loading, refreshing, error, connection, lastUpdated, stale, transportStale, sourceStale, reload } = useLiveDashboard(filters)
 
   const rawSummary = nestedRecord(data?.summary || data?.metrics || data)
   const usageStats = nestedRecord(data?.usage_stats)
@@ -94,14 +119,15 @@ export function DashboardPage() {
   const localSummary: ApiRecord = dimensionFilterActive ? summarizeLiveUsers(displayedLiveUsers) : {}
   const summary = dimensionFilterActive ? localSummary : rawSummary
 
-  const options = useMemo(() => ({
+  const computedOptions = useMemo<FilterOptions>(() => ({
     network: records(providedFilters.networks).length
       ? records(providedFilters.networks).map((item) => ({ label: asText(pick(item, 'label', 'name')), value: asText(pick(item, 'value', 'id', 'name')) }))
-      : uniqueOptions([...hubs, ...liveUsers], ['network', 'network_name']),
-    hub: uniqueOptions([...hubs, ...liveUsers], ['hub_name', 'hub', 'name']),
-    department: uniqueOptions(liveUsers, ['department', 'department_name']),
-    project: uniqueOptions([...projects, ...liveUsers], ['project_name', 'project', 'name']),
+      : toOptions([...optionValues(hubs, liveSessionFilterKeys.network), ...optionValues(liveUsers, liveSessionFilterKeys.network)]),
+    hub: toOptions([...optionValues(hubs, ['name', 'hub_name']), ...optionValues(liveUsers, liveSessionFilterKeys.hub)]),
+    department: toOptions(optionValues(liveUsers, liveSessionFilterKeys.department)),
+    project: toOptions([...optionValues(projects, ['name', 'project_name']), ...optionValues(liveUsers, liveSessionFilterKeys.project)]),
   }), [data]) // eslint-disable-line react-hooks/exhaustive-deps
+  const options = useStableOptions(computedOptions)
 
   const cpuPercent = metric(summary, 'cpu_utilization', 'cpu_percent')
   const cpuCores = metric(summary, 'cpu_cores', 'cpu_usage') ?? (dimensionFilterActive ? undefined : aggregateAll.cpu_cores)
@@ -129,7 +155,7 @@ export function DashboardPage() {
     ] : []),
   ]
 
-  const userColumns: TableColumnsType<ApiRecord> = [
+  const userColumns = useMemo<TableColumnsType<ApiRecord>>(() => [
     { title: '사용자', key: 'user', fixed: 'left', width: 150, render: (_value, row) => {
       const label = asText(pick(row, 'display_name', 'name', 'username', 'user_name'))
       const username = asText(pick(row, 'username', 'user_name', 'name'), '')
@@ -146,9 +172,9 @@ export function DashboardPage() {
     ] : []),
     { title: '수집 최신성 / 기준 시각', key: 'freshness', width: 290, render: (_value, row) => freshnessStatus(row) },
     { title: '서버 상태', key: 'status', width: 100, render: (_value, row) => <Tag color={statusTone(pick(row, 'status', 'server_status'))}>{asText(pick(row, 'status', 'server_status'))}</Tag> },
-  ]
+  ], [canViewUserDetails, features.gpuMonitoring, navigate])
 
-  const trendOption: EChartsOption = {
+  const trendOption = useMemo<EChartsOption>(() => ({
     tooltip: { trigger: 'axis' },
     legend: { bottom: 0, data: ['로그인', '서버 시작', 'CPU Core'] },
     grid: { left: 48, right: 24, top: 24, bottom: 48 },
@@ -159,21 +185,21 @@ export function DashboardPage() {
       { name: '서버 시작', type: 'line', smooth: true, showSymbol: false, data: trend.map((row) => asNumber(pick(row, 'server_starts', 'running_servers', 'servers'))) },
       { name: 'CPU Core', type: 'line', smooth: true, showSymbol: false, data: trend.map((row) => asNumber(pick(row, 'cpu_cores', 'cpu_usage', 'cpu'))) },
     ],
-  }
-  const topOption: EChartsOption = {
+  }), [trend]) // eslint-disable-line react-hooks/exhaustive-deps
+  const topOption = useMemo<EChartsOption>(() => ({
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
     grid: { left: 100, right: 28, top: 16, bottom: 28 },
     xAxis: { type: 'value' },
     yAxis: { type: 'category', data: topUsers.map((row) => chartText(pick(row, 'username', 'user', 'name'))).reverse() },
     series: [{ type: 'bar', name: '사용시간', data: topUsers.map((row) => row.runtime_seconds !== undefined ? asNumber(row.runtime_seconds) / 3600 : asNumber(pick(row, 'usage_hours', 'server_hours', 'hours'))).reverse(), itemStyle: { color: '#2563eb', borderRadius: [0, 6, 6, 0] } }],
-  }
-  const wasteOption: EChartsOption = {
+  }), [topUsers]) // eslint-disable-line react-hooks/exhaustive-deps
+  const wasteOption = useMemo<EChartsOption>(() => ({
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
     grid: { left: 100, right: 28, top: 16, bottom: 28 },
     xAxis: { type: 'value', max: 100, axisLabel: { formatter: '{value}%' } },
     yAxis: { type: 'category', data: gpuWaste.map((row) => chartText(pick(row, 'username', 'user', 'name'))).reverse() },
     series: [{ type: 'bar', name: '낭비 점수', data: gpuWaste.map((row) => pick(row, 'waste_score', 'idle_ratio') !== undefined ? asNumber(pick(row, 'waste_score', 'idle_ratio')) : Math.max(0, 100 - asNumber(row.gpu_utilization))).reverse(), itemStyle: { color: '#f97316', borderRadius: [0, 6, 6, 0] } }],
-  }
+  }), [gpuWaste]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const updatedText = lastUpdated ? formatDate(lastUpdated.toISOString()) : '아직 갱신되지 않음'
   return (
@@ -192,9 +218,10 @@ export function DashboardPage() {
           <Select allowClear showSearch optionFilterProp="label" placeholder="전체 Hub" aria-label="Hub 필터" options={options.hub} value={filters.hub} onChange={(hub) => setFilters((current) => ({ ...current, hub }))} />
           <Select allowClear showSearch optionFilterProp="label" placeholder="전체 부서" aria-label="부서 필터" options={options.department} value={filters.department} onChange={(department) => setFilters((current) => ({ ...current, department }))} />
           <Select allowClear showSearch optionFilterProp="label" placeholder="전체 프로젝트" aria-label="프로젝트 필터" options={options.project} value={filters.project} onChange={(project) => setFilters((current) => ({ ...current, project }))} />
+          {dimensionFilterActive && <Button type="link" onClick={() => setFilters((current) => ({ range: current.range }))}>필터 초기화</Button>}
         </Flex>
       </Card>
-      <AsyncState loading={loading && !data} error={error && !data ? error : null} onRetry={reload} empty={!loading && !error && !data} emptyDescription="수집된 대시보드 데이터가 없습니다.">
+      <AsyncState loading={loading && !data} refreshing={refreshing && Boolean(data)} error={error && !data ? error : null} onRetry={reload} empty={!loading && !error && !data} emptyDescription="수집된 대시보드 데이터가 없습니다.">
         <Row gutter={[16, 16]} className="kpi-grid">
           {kpis.map((item) => (
             <Col xs={24} sm={12} xl={6} xxl={3} key={item.key}>

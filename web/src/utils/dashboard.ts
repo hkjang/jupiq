@@ -8,14 +8,28 @@ export interface DashboardDimensionFilters {
   project?: string
 }
 
-export function filterLiveUsers(rows: ApiRecord[], filters: DashboardDimensionFilters) {
-  return rows.filter((row) => {
-    const matches = (selected: string | undefined, ...keys: string[]) => !selected || String(pick(row, ...keys) || '') === selected
-    return matches(filters.network, 'network', 'network_name')
-      && matches(filters.hub, 'hub', 'hub_name')
-      && matches(filters.department, 'department', 'department_name')
-      && matches(filters.project, 'project', 'project_name')
+// A session carries a dimension under whichever key its Hub reported, so a
+// filter must accept a match on any of them. Comparing only the first present
+// key made a selection built from `hub_name` miss every row that also carried a
+// numeric `hub`, and the table came back empty for a value the dropdown offered.
+export const liveSessionFilterKeys: Record<keyof DashboardDimensionFilters, string[]> = {
+  network: ['network', 'network_name'],
+  hub: ['hub_name', 'hub'],
+  department: ['department', 'department_name'],
+  project: ['project_name', 'project'],
+}
+
+export function matchesLiveSessionDimension(row: ApiRecord, dimension: keyof DashboardDimensionFilters, selected: string | undefined) {
+  if (!selected) return true
+  return liveSessionFilterKeys[dimension].some((key) => {
+    const value = row[key]
+    return value !== undefined && value !== null && String(value) === selected
   })
+}
+
+export function filterLiveUsers(rows: ApiRecord[], filters: DashboardDimensionFilters) {
+  return rows.filter((row) => (Object.keys(liveSessionFilterKeys) as (keyof DashboardDimensionFilters)[])
+    .every((dimension) => matchesLiveSessionDimension(row, dimension, filters[dimension])))
 }
 
 export function isFreshLiveSession(row: ApiRecord) {

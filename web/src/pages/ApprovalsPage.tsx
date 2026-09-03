@@ -8,6 +8,7 @@ import { PageHeader } from '../components/PageHeader'
 import { useList } from '../hooks/useList'
 import type { ApiRecord } from '../types'
 import { asText, formatDate, pick, statusTone } from '../utils/format'
+import { stableRowKey } from '../utils/rowKey'
 
 type ApprovalAction = 'review' | 'approve' | 'reject'
 
@@ -36,7 +37,7 @@ function requestSummary(row: ApiRecord) {
 export function ApprovalsPage() {
   const { message } = App.useApp()
   const { features, isAdmin, hasGlobalPermission } = useAuth()
-  const { data, loading, error, reload } = useList<ApiRecord>('/approvals')
+  const { data, loading, refreshing, error, reload } = useList<ApiRecord>('/approvals')
   const [selected, setSelected] = useState<{ row: ApiRecord; action: ApprovalAction } | null>(null)
   const [reason, setReason] = useState('')
   const [actionError, setActionError] = useState('')
@@ -110,9 +111,9 @@ export function ApprovalsPage() {
 
   return (
     <>
-      <PageHeader title="검토·승인" description="팀장 검토와 최종 승인 권한을 분리해 운영 요청을 안전하게 처리합니다." onRefresh={reload} />
-      <AsyncState loading={loading} error={error} onRetry={reload} empty={!loading && !error && data.length === 0} emptyDescription="검토하거나 승인할 요청이 없습니다.">
-        <Table<ApiRecord> rowKey={(row) => asText(row.id)} columns={columns} dataSource={data} scroll={{ x: 1100 }} pagination={{ pageSize: 20 }} />
+      <PageHeader title="검토·승인" description="팀장 검토와 최종 승인 권한을 분리해 운영 요청을 안전하게 처리합니다." onRefresh={reload} refreshing={refreshing} />
+      <AsyncState loading={loading} refreshing={refreshing} error={error} onRetry={reload} empty={!loading && !error && data.length === 0} emptyDescription="검토하거나 승인할 요청이 없습니다.">
+        <Table<ApiRecord> rowKey={(row) => stableRowKey(row, row.id)} loading={refreshing} columns={columns} dataSource={data} scroll={{ x: 1100 }} pagination={{ pageSize: 20 }} />
       </AsyncState>
       <Modal
         title={selected ? `${actionLabels[selected.action]} 사유` : '승인 요청 처리'}

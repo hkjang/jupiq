@@ -17,10 +17,10 @@ const typeInfo: Record<string, { label: string; icon: ReactNode; color: string }
 
 function SearchResults({ query }: { query: string }) {
   const navigate = useNavigate()
-  const { data, loading, error, reload } = useApi<ApiRecord>(`/search?q=${encodeURIComponent(query)}`)
+  const { data, loading, refreshing, error, reload } = useApi<ApiRecord>(`/search?q=${encodeURIComponent(query)}`)
   const items = Array.isArray(data?.items) ? data.items.filter((item): item is ApiRecord => Boolean(item) && typeof item === 'object') : []
   return (
-    <AsyncState loading={loading} error={error} onRetry={reload} empty={!loading && !error && items.length === 0} emptyDescription="권한 범위에서 일치하는 사용자, Hub, 서버 또는 프로젝트가 없습니다.">
+    <AsyncState loading={loading} refreshing={refreshing} error={error} onRetry={reload} empty={!loading && !error && items.length === 0} emptyDescription="권한 범위에서 일치하는 사용자, Hub, 서버 또는 프로젝트가 없습니다.">
       <Card>
         <List<ApiRecord>
           dataSource={items}

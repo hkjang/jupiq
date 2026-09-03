@@ -6,12 +6,13 @@ interface AsyncStateProps {
   loading: boolean
   error?: Error | null
   empty?: boolean
+  refreshing?: boolean
   onRetry?: () => void
   emptyDescription?: string
   children: ReactNode
 }
 
-export function AsyncState({ loading, error, empty, onRetry, emptyDescription = '표시할 데이터가 없습니다.', children }: AsyncStateProps) {
+export function AsyncState({ loading, error, empty, refreshing = false, onRetry, emptyDescription = '표시할 데이터가 없습니다.', children }: AsyncStateProps) {
   if (loading) return <Skeleton active paragraph={{ rows: 7 }} aria-label="데이터를 불러오는 중" />
   if (error) return (
     <Alert
@@ -23,5 +24,7 @@ export function AsyncState({ loading, error, empty, onRetry, emptyDescription = 
     />
   )
   if (empty) return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={emptyDescription} />
-  return <>{children}</>
+  // Refreshing keeps the same DOM in place; only a busy hint is added so the
+  // page never changes height while newer data is on its way.
+  return <div className={refreshing ? 'async-refreshing' : undefined} aria-busy={refreshing || undefined}>{children}</div>
 }

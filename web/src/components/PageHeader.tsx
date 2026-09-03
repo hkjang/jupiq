@@ -6,10 +6,11 @@ interface PageHeaderProps {
   title: string
   description: string
   extra?: ReactNode
+  refreshing?: boolean
   onRefresh?: () => void
 }
 
-export function PageHeader({ title, description, extra, onRefresh }: PageHeaderProps) {
+export function PageHeader({ title, description, extra, refreshing = false, onRefresh }: PageHeaderProps) {
   return (
     <header className="page-heading">
       <Breadcrumb items={[{ title: 'jupiq' }, { title }]} aria-label="현재 위치" />
@@ -19,7 +20,7 @@ export function PageHeader({ title, description, extra, onRefresh }: PageHeaderP
           <Typography.Paragraph type="secondary">{description}</Typography.Paragraph>
         </div>
         <Flex gap={8} wrap>
-          {onRefresh && <Button icon={<ReloadOutlined />} onClick={onRefresh}>새로고침</Button>}
+          {onRefresh && <Button icon={<ReloadOutlined />} loading={refreshing} onClick={onRefresh}>새로고침</Button>}
           {extra}
         </Flex>
       </Flex>

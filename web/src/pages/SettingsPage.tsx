@@ -52,6 +52,7 @@ import {
   type RoleBindingDraft,
   type RoleBindingsFormValue,
 } from '../utils/roleBindings'
+import { stableRowKey } from '../utils/rowKey'
 import { resolveOidcSettings } from '../utils/settings'
 import { AsyncState } from '../components/AsyncState'
 import { PageHeader } from '../components/PageHeader'
@@ -306,7 +307,7 @@ function RoleManager({ canWrite, canAssign }: { canWrite: boolean; canAssign: bo
     <Card title="역할·세부 권한 관리" extra={canWrite && <Button icon={<PlusOutlined />} onClick={() => showRole()}>역할 추가</Button>}>
       <Typography.Paragraph type="secondary">역할별 permission을 변경하면 다음 인증부터 적용됩니다. 시스템 역할은 삭제할 수 없고, 최고 관리자 전체 권한(*)과 마지막 최고 관리자 할당은 보호됩니다.</Typography.Paragraph>
       {error && <Alert type="error" showIcon message="역할을 불러오지 못했습니다" description={error.message} action={<Button onClick={() => void reload()}>다시 시도</Button>} />}
-      <Table<ApiRecord> rowKey={(row) => asNumber(row.id)} loading={loading} dataSource={roleRows} pagination={false} scroll={{ x: 900 }} columns={[
+      <Table<ApiRecord> rowKey={(row) => stableRowKey(row, row.id)} loading={loading} dataSource={roleRows} pagination={false} scroll={{ x: 900 }} columns={[
         { title: '역할 키', dataIndex: 'key', width: 180, render: (value, row) => <Space><strong>{asText(value)}</strong>{Boolean(row.system) && <Tag color="blue">시스템</Tag>}</Space> },
         { title: '표시 이름', dataIndex: 'name', width: 180 },
         { title: '설명', dataIndex: 'description', width: 240 },
@@ -317,7 +318,7 @@ function RoleManager({ canWrite, canAssign }: { canWrite: boolean; canAssign: bo
     {canAssign && <Card title="사용자 역할 할당" style={{ marginTop: 16 }}>
       <Typography.Paragraph type="secondary">Bootstrap·OIDC 사용자를 포함한 서비스 계정에 전역 또는 Hub·부서 제한 역할을 할당합니다.</Typography.Paragraph>
       <Alert className="data-note" type="info" showIcon message="제한 범위는 Hub·사용자·서버 관리 API에 적용됩니다" description="설정, 역할, 로컬 사용자, 감사로그, 대시보드·통계·메트릭·GPU와 기타 리소스 API는 현재 전역 권한만 허용합니다." />
-      <Table<ApiRecord> rowKey={(row) => asNumber(row.id)} loading={usersLoading} dataSource={users} pagination={{ current: usersPage, pageSize: usersPageSize, total: usersTotal, showSizeChanger: true, onChange: (page, size) => { setUsersPage(size !== usersPageSize ? 1 : page); setUsersPageSize(size) } }} scroll={{ x: 860 }} columns={[
+      <Table<ApiRecord> rowKey={(row) => stableRowKey(row, row.id)} loading={usersLoading} dataSource={users} pagination={{ current: usersPage, pageSize: usersPageSize, total: usersTotal, showSizeChanger: true, onChange: (page, size) => { setUsersPage(size !== usersPageSize ? 1 : page); setUsersPageSize(size) } }} scroll={{ x: 860 }} columns={[
         { title: '사용자', dataIndex: 'username', width: 180, render: (value, row) => <Space direction="vertical" size={0}><strong>{asText(value)}</strong><Typography.Text type="secondary">{asText(row.auth_source)}</Typography.Text></Space> },
         { title: '이름', dataIndex: 'display_name', width: 180 },
         { title: '역할·적용 범위', key: 'roles', render: (_value, row) => {
@@ -370,7 +371,7 @@ function RoleManager({ canWrite, canAssign }: { canWrite: boolean; canAssign: bo
       <Form<RoleBindingsFormValue> form={bindingForm} layout="vertical" onFinish={assignRoles} preserve={false}>
         <Form.List name="bindings">
           {(fields, { add, remove }) => <Space direction="vertical" size={12} style={{ width: '100%' }}>
-            {fields.map((field, index) => <Card key={field.key} size="small" title={`역할 할당 ${index + 1}`} extra={<Button aria-label={`역할 할당 ${index + 1} 삭제`} danger type="text" icon={<DeleteOutlined />} onClick={() => remove(field.name)} /> }>
+            {fields.map(({ key, ...field }, index) => <Card key={key} size="small" title={`역할 할당 ${index + 1}`} extra={<Button aria-label={`역할 할당 ${index + 1} 삭제`} danger type="text" icon={<DeleteOutlined />} onClick={() => remove(field.name)} /> }>
               <Row gutter={12}>
                 <Col xs={24} md={14}>
                   <Form.Item {...field} name={[field.name, 'role_id']} label="역할" rules={[{ required: true, message: '역할을 선택해 주세요.' }, { validator: validateUniqueRole }]}>
@@ -415,7 +416,7 @@ export function SettingsPage() {
   const { message } = App.useApp()
   const { refreshFeatures, hasGlobalPermission } = useAuth()
   const canWriteSettings = hasGlobalPermission('settings:write')
-  const { data, loading, error, reload } = useApi<ApiRecord>('/settings')
+  const { data, loading, refreshing, error, reload } = useApi<ApiRecord>('/settings')
   const [params, setParams] = useSearchParams()
   const [form] = Form.useForm<ApiRecord>()
   const [saving, setSaving] = useState(false)
@@ -574,14 +575,14 @@ export function SettingsPage() {
 
   return (
     <>
-      <PageHeader title="관리자 설정" description={canWriteSettings ? '서비스 정책과 모든 외부 연동을 한곳에서 안전하게 구성합니다.' : '현재 계정은 서비스 설정을 읽기 전용으로 조회할 수 있습니다.'} onRefresh={reload} extra={canWriteSettings && <Button type="primary" loading={saving} disabled={!dirty} onClick={save}>설정 저장</Button>} />
+      <PageHeader title="관리자 설정" description={canWriteSettings ? '서비스 정책과 모든 외부 연동을 한곳에서 안전하게 구성합니다.' : '현재 계정은 서비스 설정을 읽기 전용으로 조회할 수 있습니다.'} onRefresh={reload} refreshing={refreshing} extra={canWriteSettings && <Button type="primary" loading={saving} disabled={!dirty} onClick={save}>설정 저장</Button>} />
       {!canWriteSettings && <Alert className="data-note" type="info" showIcon message="읽기 전용 설정" description="설정 변경과 연결 테스트에는 settings:write 권한이 필요합니다." />}
-      <AsyncState loading={loading} error={error} onRetry={reload} empty={false}>
+      <AsyncState loading={loading && !data} refreshing={refreshing} error={error && !data ? error : null} onRetry={reload} empty={false}>
         <Form form={form} layout="vertical" requiredMark="optional" disabled={!canWriteSettings} onValuesChange={onValuesChange}>
-          <Tabs activeKey={params.get('tab') || 'general'} onChange={(tab) => setParams({ tab })} items={tabItems} />
+          <Tabs activeKey={params.get('tab') || 'general'} onChange={(tab) => setParams((current) => { const next = new URLSearchParams(current); next.set('tab', tab); return next }, { replace: true })} items={tabItems} />
         </Form>
       </AsyncState>
-      <Drawer title="연결 테스트 결과" width={Math.min(560, window.innerWidth)} open={testOpen} onClose={() => !testing && setTestOpen(false)} closable={!testing} maskClosable={!testing}>
+      <Drawer title="연결 테스트 결과" width="min(560px, 100vw)" open={testOpen} onClose={() => !testing && setTestOpen(false)} closable={!testing} maskClosable={!testing}>
         {testing && <div className="connection-testing"><Skeleton active paragraph={{ rows: 5 }} /><Typography.Text>주소, TLS와 연동별 조회·전달 권한을 확인하고 있습니다…</Typography.Text></div>}
         {!testing && testResult && (
           <Space direction="vertical" size={16} style={{ width: '100%' }}>

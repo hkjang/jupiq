@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: jupiq Control Plane API
-  version: 1.1.0
+  version: 1.2.0
   description: >-
     오프라인망 JupyterHub 통합 운영, 사용량, 정책, 승인, AI 및 MCP API.
     성공 응답은 기본적으로 data 필드를 사용하며 목록은 meta 페이지 정보를 포함한다.
@@ -96,6 +96,14 @@ paths:
       security: []
       tags: [Auth]
       operationId: startOIDCLogin
+      description: >-
+        return_to는 암호화된 OIDC state에 담겨 callback 이후 이동할 화면으로 사용된다.
+        같은 origin의 절대 경로만 허용하며 그 외의 값은 "/"로 대체한다.
+      parameters:
+        - name: return_to
+          in: query
+          required: false
+          schema: { type: string, maxLength: 512, pattern: '^/(?!/).*' }
       responses:
         '302': { description: Keycloak authorization endpoint로 이동 }
   /features:

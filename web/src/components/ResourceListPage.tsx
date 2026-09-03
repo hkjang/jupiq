@@ -16,12 +16,11 @@ import {
   Switch,
   Table,
   Tag,
-  Tooltip,
   Typography,
   type MenuProps,
   type TableColumnsType,
 } from 'antd'
-import { useDeferredValue, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { jsonBody, request } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
@@ -29,6 +28,7 @@ import { useList } from '../hooks/useList'
 import type { ApiRecord } from '../types'
 import { asNumber, asText, formatBytes, formatDate, formatPercent, pick, statusTone } from '../utils/format'
 import { hasPermissionForTargetMode } from '../utils/permissions'
+import { stableRowKey } from '../utils/rowKey'
 import { AsyncState } from './AsyncState'
 import { PageHeader } from './PageHeader'
 
@@ -118,7 +118,11 @@ function renderValue(value: unknown, format: FieldFormat = 'text', suffix?: stri
 }
 
 function rowId(record: ApiRecord) {
-  return String(pick(record, 'id', 'key', 'uuid', 'name') || '')
+  return String(pick(record, 'id', 'key', 'uuid', 'name') ?? '')
+}
+
+function rowKeyOf(record: ApiRecord) {
+  return stableRowKey(record, rowId(record))
 }
 
 export function ResourceListPage({ title, description, endpoint, columns, emptyDescription, rowActions = [], fields, createLabel = '새 항목 등록', dataNote, writePermission, scopeAwareWrite = false, globalCreate = false, editorVariant = 'modal', editorTest }: Props) {
@@ -135,13 +139,13 @@ export function ResourceListPage({ title, description, endpoint, columns, emptyD
     if (deferredQuery) params.set('search', deferredQuery)
     return `${endpoint}?${params.toString()}`
   }, [endpoint, page, pageSize, deferredQuery])
-  const { data, meta, loading, error, reload } = useList<ApiRecord>(listPath)
+  const { data, meta, loading, refreshing, error, reload } = useList<ApiRecord>(listPath)
   const [editorOpen, setEditorOpen] = useState(false)
   const [editing, setEditing] = useState<ApiRecord | null>(null)
   const [saving, setSaving] = useState(false)
   const [editorTesting, setEditorTesting] = useState(false)
   const [editorTestResult, setEditorTestResult] = useState<(ApiRecord & { success: boolean }) | null>(null)
-  const [acting, setActing] = useState('')
+  const [actingRow, setActingRow] = useState('')
   const [form] = Form.useForm()
   const permitsWrite = !writePermission || hasPermissionForTargetMode(user?.permissions, user?.global_permissions, writePermission, scopeAwareWrite)
   const canModify = Boolean(fields) && permitsWrite
@@ -152,19 +156,28 @@ export function ResourceListPage({ title, description, endpoint, columns, emptyD
     setPage(1)
   }, [queryParam])
 
+  // Pages declare `fields` inline, so the array identity changes on every parent
+  // render. Keying the reset on that identity wiped whatever the user had just
+  // typed or selected; the editor only needs to be seeded when it opens or when
+  // the edited record changes.
+  const fieldsRef = useRef(fields)
+  fieldsRef.current = fields
   useEffect(() => {
-    if (editing) form.setFieldsValue(editing)
-    else if (fields) {
+    if (!editorOpen) return
+    const current = fieldsRef.current
+    if (editing) {
       form.resetFields()
-      const initial = Object.fromEntries(fields.filter((field) => field.initialValue !== undefined).map((field) => [field.name, field.initialValue]))
+      form.setFieldsValue(editing)
+    } else if (current) {
+      form.resetFields()
+      const initial = Object.fromEntries(current.filter((field) => field.initialValue !== undefined).map((field) => [field.name, field.initialValue]))
       form.setFieldsValue(initial)
     }
-  }, [editing, fields, form])
+  }, [editing, editorOpen, form])
 
   const executeAction = async (action: RowAction, record: ApiRecord) => {
     const execute = async () => {
-      const key = `${action.key}-${rowId(record)}`
-      setActing(key)
+      setActingRow(rowKeyOf(record))
       try {
         const result = await request<ApiRecord | null>(action.path(record), {
           method: action.method || 'POST',
@@ -181,7 +194,7 @@ export function ResourceListPage({ title, description, endpoint, columns, emptyD
       } catch (caught) {
         message.error(caught instanceof Error ? caught.message : `${action.label} 작업에 실패했습니다.`)
       } finally {
-        setActing('')
+        setActingRow('')
       }
     }
     if (action.confirm) {
@@ -215,13 +228,18 @@ export function ResourceListPage({ title, description, endpoint, columns, emptyD
   }
 
   const remove = (record: ApiRecord) => {
+    const identifier = rowId(record)
+    if (!identifier) {
+      message.error('식별자가 없는 항목은 삭제할 수 없습니다.')
+      return
+    }
     modal.confirm({
       title: '항목 삭제',
       content: '이 항목을 삭제하시겠습니까? 관련 운영에 영향을 줄 수 있습니다.',
       okText: '삭제', cancelText: '취소', okButtonProps: { danger: true },
       onOk: async () => {
         try {
-          await request(`${endpoint}/${encodeURIComponent(rowId(record))}`, { method: 'DELETE' })
+          await request(`${endpoint}/${encodeURIComponent(identifier)}`, { method: 'DELETE' })
           message.success('항목을 삭제했습니다.')
           await reload()
         } catch (caught) {
@@ -272,31 +290,44 @@ export function ResourceListPage({ title, description, endpoint, columns, emptyD
         title: '작업', key: 'actions', width: 92, fixed: 'right',
         render: (_value, record) => {
           const actions = permittedRowActions.filter((action) => !action.visible || action.visible(record))
+          const busy = Boolean(actingRow) && actingRow === rowKeyOf(record)
           const menuItems: MenuProps['items'] = [
-            ...actions.map((action) => ({ key: action.key, label: action.label, danger: action.danger, disabled: Boolean(acting) })),
+            ...actions.map((action) => ({ key: action.key, label: action.label, danger: action.danger, disabled: Boolean(actingRow) })),
             ...(canModify ? [
               { type: 'divider' as const },
               { key: 'edit', icon: <EditOutlined />, label: '수정' },
               { key: 'delete', icon: <DeleteOutlined />, label: '삭제', danger: true },
             ] : []),
           ]
+          // `busy` was `acting.endsWith(rowId(record))`, and rowId is the empty
+          // string for records without an identifier, so `''.endsWith('')` left
+          // every action button on those tables permanently loading - and a
+          // loading antd Button ignores clicks, which is why the menu never
+          // opened. The trigger is also the Dropdown's direct child now instead
+          // of a Tooltip wrapper, so one popup owns the trigger.
           return (
-            <Dropdown menu={{ items: menuItems, onClick: ({ key }) => {
+            <Dropdown menu={{ items: menuItems, onClick: ({ key, domEvent }) => {
+              domEvent.stopPropagation()
               if (key === 'edit') openEdit(record)
               else if (key === 'delete') remove(record)
               else {
                 const action = actions.find((candidate) => candidate.key === key)
                 if (action) void executeAction(action, record)
               }
-            } }} trigger={['click']}>
-              <Tooltip title="작업 메뉴"><Button loading={acting.endsWith(rowId(record))} icon={<MoreOutlined />} aria-label="작업 메뉴 열기" /></Tooltip>
+            } }} trigger={['click']} destroyOnHidden>
+              <Button
+                loading={busy}
+                icon={busy ? undefined : <MoreOutlined />}
+                title="작업 메뉴"
+                aria-label="작업 메뉴 열기"
+              />
             </Dropdown>
           )
         },
       })
     }
     return configured
-  }, [columns, fields, rowActions, acting, canModify, scopeAwareWrite, user?.global_permissions, user?.permissions])
+  }, [columns, rowActions, actingRow, canModify, scopeAwareWrite, user?.global_permissions, user?.permissions])
 
   const updateQuery = (value: string) => {
     setQuery(value)
@@ -358,6 +389,7 @@ export function ResourceListPage({ title, description, endpoint, columns, emptyD
         title={title}
         description={description}
         onRefresh={reload}
+        refreshing={refreshing}
         extra={canCreate && <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>{createLabel}</Button>}
       />
       {dataNote && <div className="data-note">{dataNote}</div>}
@@ -372,9 +404,10 @@ export function ResourceListPage({ title, description, endpoint, columns, emptyD
         />
         <Typography.Text type="secondary">총 {meta.total ?? data.length}건</Typography.Text>
       </div>
-      <AsyncState loading={loading} error={error} onRetry={reload} empty={!loading && !error && data.length === 0} emptyDescription={query ? '검색 결과가 없습니다.' : emptyDescription}>
+      <AsyncState loading={loading} refreshing={refreshing} error={error} onRetry={reload} empty={!loading && !error && data.length === 0} emptyDescription={query ? '검색 결과가 없습니다.' : emptyDescription}>
         <Table<ApiRecord>
-          rowKey={(record) => rowId(record)}
+          rowKey={rowKeyOf}
+          loading={refreshing}
           columns={tableColumns}
           dataSource={data}
           scroll={{ x: Math.max(900, tableColumns.length * 150) }}

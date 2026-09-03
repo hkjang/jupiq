@@ -19,13 +19,17 @@ a { color: inherit; }
 .full-screen-state > div { display: flex; flex-direction: column; align-items: center; gap: 14px; }
 .loading-label { color: #64748b; }
 
-.app-layout { min-height: 100vh; }
-.app-sider { position: sticky !important; top: 0; height: 100vh; overflow: hidden; border-right: 1px solid #e5eaf1; z-index: 5; }
+/* The shell owns its own scroll area. When the document body scrolls, antd
+   shrinks it by the scrollbar width every time a Modal, Drawer or confirm box
+   opens, and the whole page visibly jumps sideways. With the scroll contained
+   here the body never has a scrollbar to compensate for. */
+.app-layout { height: 100vh; height: 100dvh; overflow: hidden; }
+.app-sider { position: sticky !important; top: 0; height: 100%; overflow: hidden; border-right: 1px solid #e5eaf1; z-index: 5; }
 .brand { height: 82px; display: flex; align-items: center; gap: 10px; padding: 14px 18px; text-decoration: none; overflow: hidden; }
 .brand img { width: 137px; min-width: 137px; height: 40px; object-fit: contain; object-position: left center; }
 .ant-layout-sider-collapsed .brand img { width: 48px; min-width: 48px; object-fit: cover; object-position: left; }
 .brand span { font-size: 11px; font-weight: 750; letter-spacing: .09em; color: #64748b; white-space: nowrap; }
-.main-menu { height: calc(100vh - 82px); overflow-y: auto; overflow-x: hidden; border-inline-end: 0 !important; padding-bottom: 24px; scrollbar-width: thin; scrollbar-color: #b6c2d5 transparent; }
+.main-menu { height: calc(100% - 82px); overflow-y: auto; overflow-x: hidden; border-inline-end: 0 !important; padding-bottom: 24px; scrollbar-width: thin; scrollbar-color: #b6c2d5 transparent; }
 .main-menu::-webkit-scrollbar { width: 8px; }
 .main-menu::-webkit-scrollbar-track { background: transparent; }
 .main-menu::-webkit-scrollbar-thumb { background: #b6c2d5; border: 2px solid #fff; border-radius: 999px; }
@@ -42,7 +46,13 @@ a { color: inherit; }
 .profile-summary { min-width: 230px; display: flex; flex-direction: column; gap: 2px; padding: 4px 2px; }
 .profile-summary strong { color: #172033; font-size: 16px; }
 .profile-summary span { color: #64748b; font-size: 13px; }
-.app-content { width: 100%; max-width: 1920px; min-height: calc(100vh - 68px); margin-inline: auto; padding: 28px clamp(18px, 2.5vw, 42px) 56px; }
+.app-layout > .ant-layout { min-height: 0; }
+.app-content { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.app-content-inner { width: 100%; max-width: 1920px; min-height: 100%; margin-inline: auto; padding: 28px clamp(18px, 2.5vw, 42px) 56px; }
+/* Background refreshes must not repaint the page. The wrapper only carries
+   aria-busy for assistive tech; visible progress belongs to the individual
+   Table's own loading overlay. */
+.async-refreshing { cursor: progress; }
 
 .page-heading { margin-bottom: 22px; }
 .page-heading .ant-breadcrumb { margin-bottom: 12px; }
@@ -125,7 +135,7 @@ a { color: inherit; }
 @media (max-width: 991px) {
   .app-header { padding: 0 12px; }
   .global-search { width: min(480px, 58vw); }
-  .app-content { padding: 22px 16px 42px; }
+  .app-content-inner { padding: 22px 16px 42px; }
   .login-page { grid-template-columns: 1fr; }
   .login-story { min-height: 42vh; padding: 48px 28px; }
   .login-story h1.ant-typography { font-size: clamp(34px, 8vw, 52px); }
@@ -137,7 +147,7 @@ a { color: inherit; }
   .app-header { height: 62px; }
   .global-search { display: none; }
   .mobile-search-button { display: inline-flex; }
-  .app-content { min-height: calc(100vh - 62px); padding: 18px 12px 38px; }
+  .app-content-inner { padding: 18px 12px 38px; }
   .page-heading h2.ant-typography { font-size: 26px; }
   .page-heading .ant-flex { align-items: stretch; }
   .page-heading .ant-flex > .ant-flex { width: 100%; }

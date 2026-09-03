@@ -169,8 +169,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             </Space>
           </Flex>
         </Header>
-        <Content id="main-content" className="app-content">
-          {children}
+        <Content id="main-content" className="app-content" tabIndex={-1}>
+          <div className="app-content-inner">{children}</div>
         </Content>
       </Layout>
     </Layout>

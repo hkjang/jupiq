@@ -163,7 +163,7 @@ func (s *Server) oidcConfig(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) oidcLogin(w http.ResponseWriter, r *http.Request) {
 	redirect := absoluteURL(r, "/api/v1/auth/oidc/callback")
-	authURL, stateCookie, expires, err := s.Auth.OIDCLogin(r.Context(), redirect)
+	authURL, stateCookie, expires, err := s.Auth.OIDCLogin(r.Context(), redirect, r.URL.Query().Get("return_to"))
 	if err != nil {
 		apiError(w, r, http.StatusServiceUnavailable, "oidc_unavailable", err.Error())
 		return
@@ -178,7 +178,7 @@ func (s *Server) oidcCallback(w http.ResponseWriter, r *http.Request) {
 		apiError(w, r, http.StatusBadRequest, "oidc_callback_invalid", "OIDC callback 정보가 없습니다")
 		return
 	}
-	user, err := s.Auth.OIDCCallback(r.Context(), r.URL.Query().Get("code"), r.URL.Query().Get("state"), stateCookie.Value, absoluteURL(r, "/api/v1/auth/oidc/callback"))
+	user, returnTo, err := s.Auth.OIDCCallback(r.Context(), r.URL.Query().Get("code"), r.URL.Query().Get("state"), stateCookie.Value, absoluteURL(r, "/api/v1/auth/oidc/callback"))
 	if err != nil {
 		_ = s.Store.RecordAudit(r.Context(), store.AuditEvent{Action: "auth.oidc", ResourceType: "session", Result: "failure", Reason: "oidc_callback_failed", IPAddress: clientIP(r), UserAgent: r.UserAgent(), RequestID: requestID(r)})
 		apiError(w, r, http.StatusUnauthorized, "oidc_failed", err.Error())
@@ -192,7 +192,7 @@ func (s *Server) oidcCallback(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, auth.SecureCookie(token, expires, auth.IsSecureRequest(r)))
 	http.SetCookie(w, &http.Cookie{Name: auth.OIDCStateCookie, Value: "", Path: "/api/v1/auth/oidc/callback", MaxAge: -1, HttpOnly: true, Secure: auth.IsSecureRequest(r), SameSite: http.SameSiteLaxMode})
 	_ = s.Store.RecordAudit(r.Context(), store.AuditEvent{ActorUserID: &user.ID, ActorUsername: user.Username, Action: "auth.oidc", ResourceType: "session", ResourceID: p.JTI, Result: "success", IPAddress: clientIP(r), UserAgent: r.UserAgent(), RequestID: requestID(r)})
-	http.Redirect(w, r, "/", http.StatusFound)
+	http.Redirect(w, r, auth.SanitizeReturnTo(returnTo), http.StatusFound)
 }
 
 func absoluteURL(r *http.Request, path string) string {

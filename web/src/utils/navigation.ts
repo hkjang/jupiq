@@ -6,8 +6,13 @@ export interface NavigationFeatures {
   approvalWorkflow: boolean
 }
 
+// The integrated dashboard is the service home. Every sign-in that lands on "/"
+// - a password login, an SSO callback without a deep link, or the brand link -
+// resolves here first, and only falls through when the account cannot read it.
+export const homePath = '/dashboard'
+
 export const navigationPaths = [
-  '/dashboard', '/hubs', '/users', '/servers', '/gpus', '/projects', '/policies', '/profiles',
+  homePath, '/hubs', '/users', '/servers', '/gpus', '/projects', '/policies', '/profiles',
   '/images', '/approvals', '/incidents', '/audit', '/costs', '/ai-ops', '/notifications', '/admin/settings', '/personal',
 ]
 
@@ -43,7 +48,8 @@ export function canAccessNavigationPath(path: string, permissions: string[] | un
 }
 
 export function firstAccessiblePath(permissions: string[] | undefined, features: NavigationFeatures, globalPermissions: string[] | undefined = permissions) {
-  const candidates = navigationPaths.filter((path) => path !== '/personal')
+  if (canAccessNavigationPath(homePath, permissions, features, globalPermissions)) return homePath
+  const candidates = navigationPaths.filter((path) => path !== homePath && path !== '/personal')
   return candidates.find((path) => canAccessNavigationPath(path, permissions, features, globalPermissions)) || '/personal'
 }
 

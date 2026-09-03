@@ -30,9 +30,12 @@ export function LoginPage() {
     }
   }
 
+  // The server round-trips this path through the encrypted OIDC state and
+  // redirects there after the callback, so a deep link survives SSO and a plain
+  // sign-in lands on "/" - the integrated dashboard for accounts that may read it.
   const startOidc = () => {
-    const returnTo = encodeURIComponent(from)
-    window.location.assign(`/api/v1/auth/oidc/login?return_to=${returnTo}`)
+    const returnTo = from.startsWith('/') && !from.startsWith('//') ? from : '/'
+    window.location.assign(`/api/v1/auth/oidc/login?return_to=${encodeURIComponent(returnTo)}`)
   }
 
   return (

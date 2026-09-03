@@ -36,6 +36,7 @@ import { PageHeader } from '../components/PageHeader'
 import { useApi } from '../hooks/useApi'
 import type { ApiRecord } from '../types'
 import { asNumber, asText, formatBytes, formatDate, formatDuration, normalizePercentValue, pick, statusTone } from '../utils/format'
+import { stableRowKey } from '../utils/rowKey'
 import { normalizeUserDetail, periodSummary, records, type UsagePeriod } from '../utils/userDetail'
 
 const periodLabels: Record<UsagePeriod, string> = { day: '일', week: '주', month: '월' }
@@ -119,7 +120,7 @@ function HubsTab({ rows }: { rows: ApiRecord[] }) {
     { title: '최근 활동', key: 'last_activity', width: 180, render: (_value, row) => formatDate(pick(row, 'last_activity_at', 'last_activity')) },
     { title: '마지막 동기화', key: 'synced_at', width: 180, render: (_value, row) => formatDate(row.synced_at) },
   ]
-  return rows.length ? <Table<ApiRecord> rowKey={(row) => asText(pick(row, 'hub_id', 'id', 'hub_name', 'name'))} columns={columns} dataSource={rows} pagination={false} scroll={{ x: 900 }} /> : <Empty description="연결된 Hub 계정이 없습니다." />
+  return rows.length ? <Table<ApiRecord> rowKey={(row) => stableRowKey(row, pick(row, 'hub_id', 'id', 'hub_name', 'name'))} columns={columns} dataSource={rows} pagination={false} scroll={{ x: 900 }} /> : <Empty description="연결된 Hub 계정이 없습니다." />
 }
 
 function ServersTab({ current, history, gpuEnabled }: { current: ApiRecord[]; history: ApiRecord[]; gpuEnabled: boolean }) {
@@ -136,8 +137,8 @@ function ServersTab({ current, history, gpuEnabled }: { current: ApiRecord[]; hi
     { title: '최근 활동', key: 'last_activity', width: 180, render: (_value, row) => formatDate(row.last_activity_at) },
   ]
   const items = [
-    { key: 'current', label: `현재 서버 ${current.length}`, children: current.length ? <Table<ApiRecord> rowKey={(row) => asText(pick(row, 'id', 'server_name'))} columns={columns} dataSource={current} pagination={false} scroll={{ x: 1300 }} /> : <Empty description="현재 실행 중인 서버가 없습니다." /> },
-    { key: 'history', label: `서버 이력 ${history.length}`, children: history.length ? <Table<ApiRecord> rowKey={(row) => asText(pick(row, 'id', 'server_name'))} columns={columns} dataSource={history} pagination={{ pageSize: 20 }} scroll={{ x: 1300 }} /> : <Empty description="저장된 서버 이력이 없습니다." /> },
+    { key: 'current', label: `현재 서버 ${current.length}`, children: current.length ? <Table<ApiRecord> rowKey={(row) => stableRowKey(row, pick(row, 'id', 'server_name'))} columns={columns} dataSource={current} pagination={false} scroll={{ x: 1300 }} /> : <Empty description="현재 실행 중인 서버가 없습니다." /> },
+    { key: 'history', label: `서버 이력 ${history.length}`, children: history.length ? <Table<ApiRecord> rowKey={(row) => stableRowKey(row, pick(row, 'id', 'server_name'))} columns={columns} dataSource={history} pagination={{ pageSize: 20 }} scroll={{ x: 1300 }} /> : <Empty description="저장된 서버 이력이 없습니다." /> },
   ]
   return <Tabs items={items} />
 }
@@ -206,7 +207,7 @@ function LlmTab({ llm, dataPolicy }: { llm: ApiRecord; dataPolicy: ApiRecord }) 
         <Col xs={12} lg={6}><Card><Statistic title="P95 지연" value={hasValue(summary.latency_p95_ms) ? asNumber(summary.latency_p95_ms) : '수집 불가'} suffix={hasValue(summary.latency_p95_ms) ? 'ms' : undefined} /></Card></Col>
         <Col xs={12} lg={6}><Card><Statistic title="전체 토큰" value={hasValue(summary.total_tokens) ? asNumber(summary.total_tokens) : '수집 불가'} /></Card></Col>
       </Row>
-      {rows.length ? <Table<ApiRecord> rowKey={(row) => `${asText(row.pod_name)}-${asText(row.model)}`} columns={columns} dataSource={rows} pagination={{ pageSize: 20 }} scroll={{ x: 1100 }} /> : <Empty description="수집된 LLM 호출 메타데이터가 없습니다." />}
+      {rows.length ? <Table<ApiRecord> rowKey={(row) => stableRowKey(row, row.pod_name && row.model ? `${asText(row.pod_name)}-${asText(row.model)}` : undefined)} columns={columns} dataSource={rows} pagination={{ pageSize: 20 }} scroll={{ x: 1100 }} /> : <Empty description="수집된 LLM 호출 메타데이터가 없습니다." />}
     </Space>
   )
 }
@@ -224,7 +225,7 @@ export function UserDetailPage() {
   const decodedUsername = (() => { try { return decodeURIComponent(username) } catch { return username } })()
   const { features } = useAuth()
   const [params, setParams] = useSearchParams()
-  const { data, loading, error, reload } = useApi<ApiRecord>(`/users/${encodeURIComponent(decodedUsername)}?page=1&limit=50&include_llm=true`)
+  const { data, loading, refreshing, error, reload } = useApi<ApiRecord>(`/users/${encodeURIComponent(decodedUsername)}?page=1&limit=50&include_llm=true`)
   const view = useMemo(() => normalizeUserDetail(data), [data])
   const gpuEnabled = Boolean(view.featureEnabled.gpu_monitoring ?? features.gpuMonitoring)
   const llmEnabled = Boolean(view.featureEnabled.llm_usage_monitoring ?? features.llmUsageMonitoring)
@@ -241,8 +242,8 @@ export function UserDetailPage() {
 
   return (
     <>
-      <PageHeader title={view.username || decodedUsername || '사용자 상세'} description="Hub 계정, 서버, 자원, 이용 통계와 활동 이력을 한 화면에서 확인합니다." onRefresh={reload} extra={<Button icon={<ArrowLeftOutlined />}><Link to="/users">사용자 목록</Link></Button>} />
-      <AsyncState loading={loading} error={error} onRetry={reload} empty={!loading && !error && !data} emptyDescription="사용자 상세 정보가 없습니다.">
+      <PageHeader title={view.username || decodedUsername || '사용자 상세'} description="Hub 계정, 서버, 자원, 이용 통계와 활동 이력을 한 화면에서 확인합니다." onRefresh={reload} refreshing={refreshing} extra={<Button icon={<ArrowLeftOutlined />}><Link to="/users">사용자 목록</Link></Button>} />
+      <AsyncState loading={loading && !data} refreshing={refreshing} error={error && !data ? error : null} onRetry={reload} empty={!loading && !error && !data} emptyDescription="사용자 상세 정보가 없습니다.">
         <Tabs activeKey={activeTab} items={items} onChange={(nextTab) => setParams((current) => { const next = new URLSearchParams(current); next.set('tab', nextTab); return next })} />
       </AsyncState>
     </>
