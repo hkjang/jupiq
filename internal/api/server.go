@@ -27,6 +27,12 @@ func New(s *store.Store, authService *auth.Service, logger *slog.Logger) *Server
 	return &Server{Store: s, Auth: authService, Logger: logger, loginLimiter: newLoginLimiter()}
 }
 
+// router is the subset of *http.ServeMux the register 함수들이 사용하는 부분이다.
+// 테스트가 등록 경로를 수집해 OpenAPI 문서와 대조할 수 있게 한다.
+type router interface {
+	HandleFunc(pattern string, handler func(http.ResponseWriter, *http.Request))
+}
+
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	s.registerPublic(mux)

@@ -106,6 +106,21 @@ paths:
           schema: { type: string, maxLength: 512, pattern: '^/(?!/).*' }
       responses:
         '302': { description: Keycloak authorization endpoint로 이동 }
+  /auth/oidc/callback:
+    get:
+      security: []
+      tags: [Auth]
+      operationId: completeOIDCLogin
+      description: >-
+        Keycloak이 돌려보내는 redirect 경로다. state 쿠키와 code·state 질의값이 모두 일치해야 하며
+        성공하면 세션 쿠키를 발급하고 state에 담긴 return_to 화면으로 이동한다.
+      parameters:
+        - { name: code, in: query, required: true, schema: { type: string } }
+        - { name: state, in: query, required: true, schema: { type: string } }
+      responses:
+        '302': { description: 세션 쿠키 발급 후 return_to 화면으로 이동 }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
   /features:
     get:
       tags: [Operations]
