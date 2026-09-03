@@ -24,7 +24,7 @@ type rpcError struct {
 	Data    any    `json:"data,omitempty"`
 }
 
-func (s *Server) registerMCP(mux *http.ServeMux) {
+func (s *Server) registerMCP(mux router) {
 	mux.HandleFunc("POST /mcp", s.require("mcp:use", s.mcp))
 	mux.HandleFunc("POST /api/v1/mcp", s.require("mcp:use", s.mcp))
 }

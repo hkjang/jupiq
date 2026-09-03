@@ -17,7 +17,7 @@ import (
 	"github.com/hkjang/jupiq/internal/store"
 )
 
-func (s *Server) registerCore(mux *http.ServeMux) {
+func (s *Server) registerCore(mux router) {
 	mux.HandleFunc("GET /api/v1/features", s.require("", s.featuresGet))
 	mux.HandleFunc("GET /api/v1/search", s.require("", s.globalSearch))
 	mux.HandleFunc("GET /api/v1/dashboard", s.require("dashboard:read", s.dashboard))

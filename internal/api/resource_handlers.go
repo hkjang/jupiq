@@ -18,7 +18,7 @@ var resourceKinds = map[string]string{
 	"approvals": "approval", "incidents": "incident", "notifications": "notification", "costs": "cost",
 }
 
-func (s *Server) registerResources(mux *http.ServeMux) {
+func (s *Server) registerResources(mux router) {
 	for path, kind := range resourceKinds {
 		path, kind := path, kind
 		mux.HandleFunc("GET /api/v1/"+path, s.require(resourcePermission(kind, "read"), func(w http.ResponseWriter, r *http.Request) { s.resourceList(w, r, kind) }))
@@ -466,7 +466,7 @@ func numberFromAny(v any) float64 {
 	return 0
 }
 
-func (s *Server) registerHubs(mux *http.ServeMux) {
+func (s *Server) registerHubs(mux router) {
 	mux.HandleFunc("GET /api/v1/hubs", s.require("", s.hubsList))
 	mux.HandleFunc("POST /api/v1/hubs", s.require("hubs:write", s.hubCreate))
 	mux.HandleFunc("GET /api/v1/hubs/{id}", s.require("", s.hubGet))

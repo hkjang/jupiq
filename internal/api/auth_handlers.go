@@ -11,7 +11,7 @@ import (
 	"github.com/hkjang/jupiq/internal/store"
 )
 
-func (s *Server) registerPublic(mux *http.ServeMux) {
+func (s *Server) registerPublic(mux router) {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { data(w, http.StatusOK, map[string]any{"status": "ok"}) })
 	mux.HandleFunc("GET /readyz", s.ready)
 	mux.HandleFunc("GET /api/v1/version", s.version)
@@ -25,7 +25,7 @@ func (s *Server) registerPublic(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/auth/oidc/callback", s.oidcCallback)
 }
 
-func (s *Server) registerAuth(mux *http.ServeMux) {
+func (s *Server) registerAuth(mux router) {
 	mux.HandleFunc("GET /api/v1/auth/me", s.require("", s.me))
 	mux.HandleFunc("PATCH /api/v1/auth/me", s.require("", interactiveSessionOnly(s.meUpdate)))
 	mux.HandleFunc("POST /api/v1/auth/logout", s.require("", interactiveSessionOnly(s.logout)))

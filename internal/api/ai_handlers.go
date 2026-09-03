@@ -28,7 +28,7 @@ type aiChatInput struct {
 	Temperature *float64        `json:"temperature"`
 }
 
-func (s *Server) registerAI(mux *http.ServeMux) {
+func (s *Server) registerAI(mux router) {
 	mux.HandleFunc("POST /api/v1/ai/chat", s.require("ai:chat", s.aiChat))
 }
 
