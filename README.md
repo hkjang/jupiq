@@ -99,7 +99,7 @@ npm run dev
 go run ./cmd/jupiq
 ```
 
-Frontend는 same-origin `/api/v1`을 사용합니다. 프로덕션 빌드의 `web/dist`는 Go 서버가 SPA fallback으로 제공합니다.
+Frontend는 same-origin `/api/v1`을 사용합니다. 프로덕션 빌드의 `web/dist`는 Go 서버가 SPA fallback으로 제공합니다. 이때 content hash가 붙는 `/assets/*`는 1년 `immutable`로, 이름이 고정인 나머지 정적 파일은 매 요청 재검증으로, `index.html`은 `no-store`로 응답합니다.
 
 ## 컨테이너와 오프라인 패키지
 
