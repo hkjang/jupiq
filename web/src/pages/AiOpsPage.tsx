@@ -9,7 +9,7 @@ import { ChartCard } from '../components/ChartCard'
 import { PageHeader } from '../components/PageHeader'
 import { useLiveLlmUsage, type LlmUsageRange } from '../hooks/useLiveLlmUsage'
 import type { ApiRecord } from '../types'
-import { asNumber, asText, formatDate, normalizePercentValue, pick, statusTone } from '../utils/format'
+import { asNumber, asText, formatDate, formatMetricNumber, normalizePercentValue, pick, statusTone } from '../utils/format'
 import { stableRowKey } from '../utils/rowKey'
 
 interface ChatMessage { id: string; role: 'user' | 'assistant'; content: string }
@@ -121,8 +121,8 @@ function LlmUsagePanel() {
     series: [{ name: '호출 수', type: 'line', smooth: true, areaStyle: { opacity: 0.1 }, data: trend.map((row) => asNumber(pick(row, 'requests', 'calls'))) }, { name: '오류 수', type: 'line', smooth: true, data: trend.map((row) => asNumber(pick(row, 'errors', 'failed'))) }],
   }), [trend])
   const topOption: EChartsOption = useMemo(() => ({
-    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } }, grid: { left: 100, right: 24, top: 20, bottom: 28 },
-    xAxis: { type: 'value' }, yAxis: { type: 'category', data: top.map((row) => asText(pick(row, 'username', 'user', 'group'), '')).reverse() },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } }, grid: { left: 108, right: 24, top: 20, bottom: 28 },
+    xAxis: { type: 'value' }, yAxis: { type: 'category', data: top.map((row) => asText(pick(row, 'username', 'user', 'group'), '')).reverse(), axisLabel: { interval: 0, width: 92, overflow: 'truncate', hideOverlap: false } },
     series: [{ type: 'bar', data: top.map((row) => asNumber(pick(row, 'requests', 'calls'))).reverse(), itemStyle: { color: '#7c3aed', borderRadius: [0, 6, 6, 0] } }],
   }), [top])
 
@@ -136,7 +136,7 @@ function LlmUsagePanel() {
         <Row gutter={[16, 16]} className="kpi-grid">
           <Col xs={12} xl={6}><Card><Statistic title="전체 호출" value={asNumber(pick(summary, 'requests', 'request_count', 'calls'))} /></Card></Col>
           <Col xs={12} xl={6}><Card><Statistic title="성공률" value={successRate(summary) ?? '수집 불가'} suffix={successRate(summary) === undefined ? undefined : '%'} precision={1} /></Card></Col>
-          <Col xs={12} xl={6}><Card><Statistic title="P95 지연" value={pick(summary, 'p95_ms', 'latency_p95_ms') === undefined ? '수집 불가' : asNumber(pick(summary, 'p95_ms', 'latency_p95_ms'))} suffix={pick(summary, 'p95_ms', 'latency_p95_ms') === undefined ? undefined : 'ms'} /></Card></Col>
+          <Col xs={12} xl={6}><Card><Statistic title="P95 지연" value={pick(summary, 'p95_ms', 'latency_p95_ms') === undefined ? '수집 불가' : formatMetricNumber(pick(summary, 'p95_ms', 'latency_p95_ms'))} suffix={pick(summary, 'p95_ms', 'latency_p95_ms') === undefined ? undefined : 'ms'} /></Card></Col>
           <Col xs={12} xl={6}><Card><Statistic title="추정 비용" value={money(pick(summary, 'estimated_cost', 'cost'))} /></Card></Col>
         </Row>
         <div className="chart-grid two"><ChartCard title="시간대별 호출 추세" option={trendOption} empty={!trend.length} /><ChartCard title="Top 호출자" option={topOption} empty={!top.length} /></div>

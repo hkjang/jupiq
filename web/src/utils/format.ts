@@ -32,6 +32,20 @@ export function formatPercent(value: unknown): string {
   return `${number.toLocaleString('ko-KR', { maximumFractionDigits: 1 })}%`
 }
 
+// KPI cards hand numbers straight to antd Statistic, which prints every digit
+// a summed float carries (0.004166666666667 Core). Two fraction digits cover
+// ordinary values; a value that would round away to 0 keeps two significant
+// digits instead so a small-but-real reading still shows as 0.0042 rather than 0.
+export function formatMetricNumber(value: unknown): string {
+  const number = asNumber(value, Number.NaN)
+  if (!Number.isFinite(number)) return asText(value)
+  const rounded = number.toLocaleString('ko-KR', { maximumFractionDigits: 2 })
+  if (number !== 0 && Number(rounded.replace(/,/g, '')) === 0) {
+    return number.toLocaleString('ko-KR', { maximumSignificantDigits: 2 })
+  }
+  return rounded
+}
+
 export function normalizePercentValue(value: unknown): number {
   const number = asNumber(value)
   return Math.abs(number) <= 1 ? number * 100 : number

@@ -80,7 +80,7 @@ jobs:
           node scripts/check-screenshots.mjs
           cd web
           npm ci
-          npm audit --audit-level=high
+          ../scripts/npm-audit-retry.sh high
           npm run lint
           npm test
           npm run build

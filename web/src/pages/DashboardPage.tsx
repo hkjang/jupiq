@@ -18,7 +18,7 @@ import { ChartCard } from '../components/ChartCard'
 import { PageHeader } from '../components/PageHeader'
 import { useLiveDashboard, type DashboardFilters } from '../hooks/useLiveDashboard'
 import type { ApiRecord } from '../types'
-import { asNumber, asText, formatBytes, formatDate, formatDuration, pick, statusTone } from '../utils/format'
+import { asNumber, asText, formatBytes, formatDate, formatDuration, formatMetricNumber, pick, statusTone } from '../utils/format'
 import { filterLiveUsers, formatCpuResource, formatGpuResource, formatMemoryResource, formatVramResource, isFreshLiveSession, liveSessionFilterKeys, summarizeLiveUsers } from '../utils/dashboard'
 
 function records(value: unknown): ApiRecord[] {
@@ -61,9 +61,10 @@ function useStableOptions(next: FilterOptions): FilterOptions {
 }
 
 function chartText(value: unknown) { return asText(value, '') }
-function statisticValue(value: unknown): string | number | undefined {
+function statisticValue(value: unknown): string | undefined {
   if (value === null || value === undefined) return undefined
-  return typeof value === 'string' || typeof value === 'number' ? value : asText(value)
+  if (typeof value === 'number') return formatMetricNumber(value)
+  return typeof value === 'string' ? value : asText(value)
 }
 
 function liveSessionKey(row: ApiRecord) {
@@ -188,16 +189,16 @@ export function DashboardPage() {
   }), [trend]) // eslint-disable-line react-hooks/exhaustive-deps
   const topOption = useMemo<EChartsOption>(() => ({
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    grid: { left: 100, right: 28, top: 16, bottom: 28 },
+    grid: { left: 108, right: 28, top: 16, bottom: 28 },
     xAxis: { type: 'value' },
-    yAxis: { type: 'category', data: topUsers.map((row) => chartText(pick(row, 'username', 'user', 'name'))).reverse() },
+    yAxis: { type: 'category', data: topUsers.map((row) => chartText(pick(row, 'username', 'user', 'name'))).reverse(), axisLabel: { interval: 0, width: 92, overflow: 'truncate', hideOverlap: false } },
     series: [{ type: 'bar', name: '사용시간', data: topUsers.map((row) => row.runtime_seconds !== undefined ? asNumber(row.runtime_seconds) / 3600 : asNumber(pick(row, 'usage_hours', 'server_hours', 'hours'))).reverse(), itemStyle: { color: '#2563eb', borderRadius: [0, 6, 6, 0] } }],
   }), [topUsers]) // eslint-disable-line react-hooks/exhaustive-deps
   const wasteOption = useMemo<EChartsOption>(() => ({
     tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-    grid: { left: 100, right: 28, top: 16, bottom: 28 },
+    grid: { left: 108, right: 28, top: 16, bottom: 28 },
     xAxis: { type: 'value', max: 100, axisLabel: { formatter: '{value}%' } },
-    yAxis: { type: 'category', data: gpuWaste.map((row) => chartText(pick(row, 'username', 'user', 'name'))).reverse() },
+    yAxis: { type: 'category', data: gpuWaste.map((row) => chartText(pick(row, 'username', 'user', 'name'))).reverse(), axisLabel: { interval: 0, width: 92, overflow: 'truncate', hideOverlap: false } },
     series: [{ type: 'bar', name: '낭비 점수', data: gpuWaste.map((row) => pick(row, 'waste_score', 'idle_ratio') !== undefined ? asNumber(pick(row, 'waste_score', 'idle_ratio')) : Math.max(0, 100 - asNumber(row.gpu_utilization))).reverse(), itemStyle: { color: '#f97316', borderRadius: [0, 6, 6, 0] } }],
   }), [gpuWaste]) // eslint-disable-line react-hooks/exhaustive-deps
 
