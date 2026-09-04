@@ -2,10 +2,13 @@ package collector
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/hkjang/jupiq/internal/integration"
+	"github.com/hkjang/jupiq/internal/store"
 )
 
 func TestNormalizeLLMLabels(t *testing.T) {
@@ -42,6 +45,42 @@ func TestLLMScanCadenceDoesNotOverlapDefaultPromQLWindow(t *testing.T) {
 	}
 	if !c.llmScanDue(llmEvaluationTime(now.Add(time.Minute))) {
 		t.Fatal("one-minute counter window should run")
+	}
+}
+
+func TestPruneRetriesSoonAfterFailure(t *testing.T) {
+	c := &Collector{}
+	start := time.Date(2026, 9, 5, 3, 0, 0, 0, time.UTC)
+	if !c.pruneDue(start) {
+		t.Fatal("first prune should run")
+	}
+	if c.pruneDue(start.Add(time.Minute)) {
+		t.Fatal("a successful prune must not repeat on the next base tick")
+	}
+	c.pruneFailed()
+	if c.pruneDue(start.Add(pruneRetryInterval - time.Minute)) {
+		t.Fatal("a failed prune must not retry on every base tick")
+	}
+	if !c.pruneDue(start.Add(pruneRetryInterval)) {
+		t.Fatal("a failed prune must retry well before the next daily cycle")
+	}
+	if c.pruneDue(start.Add(pruneRetryInterval + pruneRetryInterval)) {
+		t.Fatal("a successful retry must restore the daily cadence")
+	}
+	if !c.pruneDue(start.Add(pruneRetryInterval + pruneInterval)) {
+		t.Fatal("the daily cycle should run again")
+	}
+}
+
+func TestRetentionReadableOnlyToleratesMissingSettings(t *testing.T) {
+	if !retentionReadable(nil) {
+		t.Fatal("a successful read is usable")
+	}
+	if !retentionReadable(fmt.Errorf("read settings: %w", store.ErrNotFound)) {
+		t.Fatal("an unset retention window falls back to the built-in default")
+	}
+	if retentionReadable(errors.New("connection refused")) {
+		t.Fatal("pruning with the default window after a failed read would delete samples the operator kept")
 	}
 }
 
