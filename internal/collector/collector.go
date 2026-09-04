@@ -3,12 +3,18 @@ package collector
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/hkjang/jupiq/internal/integration"
 	"github.com/hkjang/jupiq/internal/store"
+)
+
+const (
+	pruneInterval      = 24 * time.Hour
+	pruneRetryInterval = 30 * time.Minute
 )
 
 type Collector struct {
@@ -18,6 +24,7 @@ type Collector struct {
 	last        map[int64]time.Time
 	lastLLMScan time.Time
 	lastPrune   time.Time
+	pruneRetry  bool
 }
 
 func New(s *store.Store, logger *slog.Logger) *Collector {
@@ -343,25 +350,61 @@ func (c *Collector) llmScanDue(now time.Time) bool {
 	return true
 }
 
-func (c *Collector) prune(ctx context.Context) {
-	now := time.Now()
+// pruneDue reports whether retention pruning should run now and records the
+// attempt. A cycle that ends in pruneFailed is retried after
+// pruneRetryInterval instead of the full pruneInterval, so one transient
+// database error cannot stall retention for an entire day.
+func (c *Collector) pruneDue(now time.Time) bool {
 	c.mu.Lock()
-	if !c.lastPrune.IsZero() && now.Sub(c.lastPrune) < 24*time.Hour {
-		c.mu.Unlock()
-		return
+	defer c.mu.Unlock()
+	wait := pruneInterval
+	if c.pruneRetry {
+		wait = pruneRetryInterval
+	}
+	if !c.lastPrune.IsZero() && now.Sub(c.lastPrune) < wait {
+		return false
 	}
 	c.lastPrune = now
-	c.mu.Unlock()
+	c.pruneRetry = false
+	return true
+}
+
+func (c *Collector) pruneFailed() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.pruneRetry = true
+}
+
+// retentionReadable reports whether a retention setting read produced a usable
+// answer. A missing row means the operator never overrode the built-in
+// retention, but any other error leaves the configured window unknown.
+func retentionReadable(err error) bool {
+	return err == nil || errors.Is(err, store.ErrNotFound)
+}
+
+func (c *Collector) prune(ctx context.Context) {
+	if !c.pruneDue(time.Now()) {
+		return
+	}
 	var system struct {
 		RawRetentionDays int `json:"raw_retention_days"`
 	}
 	var llm struct {
 		RetentionDays int `json:"retention_days"`
 	}
-	_ = c.Store.GetSetting(ctx, "system", &system)
-	_ = c.Store.GetSetting(ctx, "llm_usage", &llm)
+	// PruneMetrics falls back to 30 days for an unset window. Applying that
+	// fallback because the settings read itself failed would delete samples an
+	// operator asked to keep longer, so leave the data alone and retry.
+	systemErr := c.Store.GetSetting(ctx, "system", &system)
+	llmErr := c.Store.GetSetting(ctx, "llm_usage", &llm)
+	if !retentionReadable(systemErr) || !retentionReadable(llmErr) {
+		c.Logger.Warn("metric retention settings unreadable", "system_error", systemErr, "llm_error", llmErr)
+		c.pruneFailed()
+		return
+	}
 	if err := c.Store.PruneMetrics(ctx, system.RawRetentionDays, llm.RetentionDays); err != nil {
 		c.Logger.Warn("metric retention prune failed", "error", err)
+		c.pruneFailed()
 	}
 }
 
