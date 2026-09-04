@@ -7,23 +7,37 @@
 }
 
 * { box-sizing: border-box; }
-html { min-width: 320px; background: #f3f6fb; }
-body { margin: 0; min-width: 320px; min-height: 100vh; font-size: 16px; line-height: 1.55; }
+/* The document itself never scrolls, and #root owns the scrolling instead.
+   antd renders every Dropdown, Select and Tooltip popup onto <body>, so on a
+   browser with classic scrollbars a popup opened near the bottom of a page used
+   to push the document past the viewport: a scrollbar appeared, the layout
+   narrowed by its width, the popup was realigned to the new box, it fitted
+   again, the scrollbar vanished - and the page oscillated under the pointer.
+   `overflow: hidden` here also makes antd's scroll locker skip its
+   `width: calc(100% - <scrollbar>px)` compensation, which shifted the whole
+   shell sideways every time a Modal or Drawer opened. Popups are not clipped by
+   this: <body> stays statically positioned, so their containing block is the
+   initial containing block, not the body box. */
+html { min-width: 320px; height: 100%; overflow: hidden; background: #f3f6fb; }
+body { margin: 0; min-width: 320px; height: 100%; overflow: hidden; font-size: 16px; line-height: 1.55; }
+#root { height: 100%; overflow-y: auto; overflow-x: hidden; }
+/* antd's <App> wraps the tree in a plain div. Without a height here the
+   percentage chain down to .app-layout breaks and the shell grows to its
+   content instead of filling the viewport. */
+#root > .ant-app { height: 100%; }
 button, input, textarea, select { font: inherit; }
 a { color: inherit; }
 :focus-visible { outline: 3px solid rgba(37, 99, 235, .35) !important; outline-offset: 2px; }
 
 .skip-link { position: fixed; z-index: 9999; top: 8px; left: 8px; padding: 10px 16px; border-radius: 8px; color: #fff; background: #172554; transform: translateY(-150%); }
 .skip-link:focus { transform: translateY(0); }
-.full-screen-state { min-height: 100vh; display: grid; place-items: center; }
+.full-screen-state { min-height: 100%; display: grid; place-items: center; }
 .full-screen-state > div { display: flex; flex-direction: column; align-items: center; gap: 14px; }
 .loading-label { color: #64748b; }
 
-/* The shell owns its own scroll area. When the document body scrolls, antd
-   shrinks it by the scrollbar width every time a Modal, Drawer or confirm box
-   opens, and the whole page visibly jumps sideways. With the scroll contained
-   here the body never has a scrollbar to compensate for. */
-.app-layout { height: 100vh; height: 100dvh; overflow: hidden; }
+/* The shell fills #root exactly and scrolls in .app-content, so opening a
+   popup or a modal can never change the document's scroll state. */
+.app-layout { height: 100%; overflow: hidden; }
 .app-sider { position: sticky !important; top: 0; height: 100%; overflow: hidden; border-right: 1px solid #e5eaf1; z-index: 5; }
 .brand { height: 82px; display: flex; align-items: center; gap: 10px; padding: 14px 18px; text-decoration: none; overflow: hidden; }
 .brand img { width: 137px; min-width: 137px; height: 40px; object-fit: contain; object-position: left center; }
@@ -96,7 +110,7 @@ a { color: inherit; }
 .search-result-button { width: 100%; padding: 14px 10px; border: 0; border-radius: 8px; background: transparent; color: inherit; text-align: left; cursor: pointer; }
 .search-result-button:hover, .search-result-button:focus-visible { outline: 2px solid transparent; background: #f5f8fc; }
 
-.login-page { min-height: 100vh; display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(420px, .85fr); background: #f8fafc; }
+.login-page { min-height: 100%; display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(420px, .85fr); background: #f8fafc; }
 .login-story { position: relative; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; gap: 20px; overflow: hidden; padding: clamp(42px, 7vw, 112px); color: #e2e8f0; background: radial-gradient(circle at 85% 15%, rgba(56, 189, 248, .23), transparent 30%), radial-gradient(circle at 10% 90%, rgba(99, 102, 241, .32), transparent 38%), #0f172a; }
 .login-story::after { content: ""; position: absolute; inset: auto -8% -18% auto; width: 430px; height: 430px; border: 1px solid rgba(148, 163, 184, .16); border-radius: 50%; box-shadow: 0 0 0 70px rgba(148,163,184,.035), 0 0 0 140px rgba(148,163,184,.025); }
 .login-logo { width: 176px; padding: 9px; border-radius: 12px; background: rgba(255,255,255,.94); }
