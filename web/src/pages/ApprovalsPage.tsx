@@ -9,6 +9,7 @@ import { useList } from '../hooks/useList'
 import type { ApiRecord } from '../types'
 import { asText, formatDate, pick, statusTone } from '../utils/format'
 import { stableRowKey } from '../utils/rowKey'
+import { sorterFor } from '../utils/sorting'
 
 type ApprovalAction = 'review' | 'approve' | 'reject'
 
@@ -84,15 +85,15 @@ export function ApprovalsPage() {
   }
 
   const columns: TableColumnsType<ApiRecord> = [
-    { title: '요청 번호', key: 'id', width: 120, render: (_value, row) => `#${asText(pick(row, 'request_no', 'id'))}` },
-    { title: '요청자', key: 'requester', width: 140, render: (_value, row) => asText(pick(row, 'requested_by', 'requester_name', 'username')) },
+    { title: '요청 번호', key: 'id', width: 120, sorter: sorterFor(['request_no', 'id']), showSorterTooltip: false, render: (_value, row) => `#${asText(pick(row, 'request_no', 'id'))}` },
+    { title: '요청자', key: 'requester', width: 140, sorter: sorterFor(['requested_by', 'requester_name', 'username']), showSorterTooltip: false, render: (_value, row) => asText(pick(row, 'requested_by', 'requester_name', 'username')) },
     { title: '요청 유형', key: 'type', width: 160, render: (_value, row) => asText(pick(row, 'request_type', 'type')) === 'server_action' ? '서버 작업' : asText(pick(row, 'request_type', 'type')) },
     { title: '요청 내용', key: 'summary', width: 280, render: (_value, row) => requestSummary(row) },
-    { title: '상태', key: 'status', width: 140, render: (_value, row) => {
+    { title: '상태', key: 'status', width: 140, sorter: sorterFor(['status']), showSorterTooltip: false, render: (_value, row) => {
       const status = asText(row.status, '')
       return <Tag color={statusTone(status)}>{statusLabels[status] || status}</Tag>
     } },
-    { title: '요청 시각', key: 'created_at', width: 180, render: (_value, row) => formatDate(pick(row, 'requested_at', 'created_at')) },
+    { title: '요청 시각', key: 'created_at', width: 180, sorter: sorterFor(['requested_at', 'created_at'], 'date'), showSorterTooltip: false, render: (_value, row) => formatDate(pick(row, 'requested_at', 'created_at')) },
     { title: '처리', key: 'actions', fixed: 'right', width: 180, render: (_value, row) => {
       const status = asText(row.status, '')
       if (status === 'pending_review' && hasGlobalPermission('approval:review')) {

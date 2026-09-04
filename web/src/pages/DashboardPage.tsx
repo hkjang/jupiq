@@ -19,6 +19,7 @@ import { PageHeader } from '../components/PageHeader'
 import { useLiveDashboard, type DashboardFilters } from '../hooks/useLiveDashboard'
 import type { ApiRecord } from '../types'
 import { asNumber, asText, formatBytes, formatDate, formatDuration, formatMetricNumber, pick, statusTone } from '../utils/format'
+import { sorterBy, sorterFor } from '../utils/sorting'
 import { filterLiveUsers, formatCpuResource, formatGpuResource, formatMemoryResource, formatVramResource, isFreshLiveSession, liveSessionFilterKeys, summarizeLiveUsers } from '../utils/dashboard'
 
 function records(value: unknown): ApiRecord[] {
@@ -157,22 +158,22 @@ export function DashboardPage() {
   ]
 
   const userColumns = useMemo<TableColumnsType<ApiRecord>>(() => [
-    { title: '사용자', key: 'user', fixed: 'left', width: 150, render: (_value, row) => {
+    { title: '사용자', key: 'user', fixed: 'left', width: 150, sorter: sorterFor(['display_name', 'name', 'username', 'user_name']), showSorterTooltip: false, render: (_value, row) => {
       const label = asText(pick(row, 'display_name', 'name', 'username', 'user_name'))
       const username = asText(pick(row, 'username', 'user_name', 'name'), '')
       return canViewUserDetails && username ? <button className="text-link" onClick={() => navigate(`/users/${encodeURIComponent(username)}`)}>{label}</button> : label
     } },
-    { title: '망 / Hub', key: 'hub', width: 180, render: (_value, row) => <Space direction="vertical" size={0}><span>{asText(pick(row, 'network', 'network_name'))}</span><Typography.Text type="secondary">{asText(pick(row, 'hub_name', 'hub'))}</Typography.Text></Space> },
-    { title: '부서 / 프로젝트', key: 'org', width: 180, render: (_value, row) => <Space direction="vertical" size={0}><span>{asText(pick(row, 'department', 'department_name'))}</span><Typography.Text type="secondary">{asText(pick(row, 'project_name', 'project'))}</Typography.Text></Space> },
-    { title: '실행시간', key: 'runtime', width: 120, render: (_value, row) => row.runtime_seconds !== undefined ? formatDuration(row.runtime_seconds) : asText(pick(row, 'runtime', 'running_time', 'server_runtime')) },
-    { title: 'CPU', key: 'cpu', width: 110, render: (_value, row) => formatCpuResource(row) },
-    { title: 'RAM', key: 'memory', width: 120, render: (_value, row) => formatMemoryResource(row) },
+    { title: '망 / Hub', key: 'hub', width: 180, sorter: sorterFor(['hub_name', 'hub']), showSorterTooltip: false, render: (_value, row) => <Space direction="vertical" size={0}><span>{asText(pick(row, 'network', 'network_name'))}</span><Typography.Text type="secondary">{asText(pick(row, 'hub_name', 'hub'))}</Typography.Text></Space> },
+    { title: '부서 / 프로젝트', key: 'org', width: 180, sorter: sorterFor(['department', 'department_name']), showSorterTooltip: false, render: (_value, row) => <Space direction="vertical" size={0}><span>{asText(pick(row, 'department', 'department_name'))}</span><Typography.Text type="secondary">{asText(pick(row, 'project_name', 'project'))}</Typography.Text></Space> },
+    { title: '실행시간', key: 'runtime', width: 120, sorter: sorterFor(['runtime_seconds'], 'number'), showSorterTooltip: false, render: (_value, row) => row.runtime_seconds !== undefined ? formatDuration(row.runtime_seconds) : asText(pick(row, 'runtime', 'running_time', 'server_runtime')) },
+    { title: 'CPU', key: 'cpu', width: 110, sorter: sorterBy((row: ApiRecord) => pick(row, 'cpu_percent', 'cpu_utilization', 'cpu_cores', 'cpu_usage', 'cpu'), 'number'), showSorterTooltip: false, render: (_value, row) => formatCpuResource(row) },
+    { title: 'RAM', key: 'memory', width: 120, sorter: sorterBy((row: ApiRecord) => pick(row, 'memory_percent', 'memory_utilization', 'memory_bytes', 'memory_usage', 'memory'), 'number'), showSorterTooltip: false, render: (_value, row) => formatMemoryResource(row) },
     ...(features.gpuMonitoring ? [
       { title: 'GPU', key: 'gpu', width: 110, render: (_value: unknown, row: ApiRecord) => formatGpuResource(row) },
       { title: 'VRAM', key: 'vram', width: 120, render: (_value: unknown, row: ApiRecord) => formatVramResource(row) },
     ] : []),
     { title: '수집 최신성 / 기준 시각', key: 'freshness', width: 290, render: (_value, row) => freshnessStatus(row) },
-    { title: '서버 상태', key: 'status', width: 100, render: (_value, row) => <Tag color={statusTone(pick(row, 'status', 'server_status'))}>{asText(pick(row, 'status', 'server_status'))}</Tag> },
+    { title: '서버 상태', key: 'status', width: 100, sorter: sorterFor(['status', 'server_status']), showSorterTooltip: false, render: (_value, row) => <Tag color={statusTone(pick(row, 'status', 'server_status'))}>{asText(pick(row, 'status', 'server_status'))}</Tag> },
   ], [canViewUserDetails, features.gpuMonitoring, navigate])
 
   const trendOption = useMemo<EChartsOption>(() => ({

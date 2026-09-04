@@ -11,6 +11,7 @@ import { useLiveLlmUsage, type LlmUsageRange } from '../hooks/useLiveLlmUsage'
 import type { ApiRecord } from '../types'
 import { asNumber, asText, formatDate, formatMetricNumber, normalizePercentValue, pick, statusTone } from '../utils/format'
 import { stableRowKey } from '../utils/rowKey'
+import { sorterBy, sorterFor } from '../utils/sorting'
 
 interface ChatMessage { id: string; role: 'user' | 'assistant'; content: string }
 
@@ -104,15 +105,15 @@ function LlmUsagePanel() {
   const tokenText = (value: unknown) => value === undefined || value === null ? '수집 불가' : asNumber(value).toLocaleString('ko-KR')
   const money = (value: unknown) => value === undefined || value === null ? '수집 불가' : new Intl.NumberFormat('ko-KR', { style: 'currency', currency: 'KRW', maximumFractionDigits: 0 }).format(asNumber(value))
   const columns: TableColumnsType<ApiRecord> = [
-    { title: '사용자', key: 'username', width: 140, render: (_value, row) => asText(pick(row, 'username', 'user', 'group')) },
+    { title: '사용자', key: 'username', width: 140, sorter: sorterFor(['username', 'user', 'group']), showSorterTooltip: false, render: (_value, row) => asText(pick(row, 'username', 'user', 'group')) },
     { title: 'Pod', key: 'pod', width: 210, render: (_value, row) => asText(pick(row, 'pod', 'pod_name')) },
-    { title: '모델', key: 'model', width: 150, render: (_value, row) => asText(row.model) },
-    { title: '호출', key: 'requests', width: 100, render: (_value, row) => asNumber(pick(row, 'requests', 'request_count', 'calls')).toLocaleString('ko-KR') },
-    { title: '성공률', key: 'success_rate', width: 100, render: (_value, row) => { const rate = successRate(row); return rate === undefined ? '수집 불가' : `${rate.toLocaleString('ko-KR', { maximumFractionDigits: 1 })}%` } },
-    { title: 'P95', key: 'p95', width: 100, render: (_value, row) => pick(row, 'p95_ms', 'latency_p95_ms') === undefined ? '수집 불가' : `${asNumber(pick(row, 'p95_ms', 'latency_p95_ms')).toLocaleString('ko-KR')}ms` },
+    { title: '모델', key: 'model', width: 150, sorter: sorterFor(['model']), showSorterTooltip: false, render: (_value, row) => asText(row.model) },
+    { title: '호출', key: 'requests', width: 100, sorter: sorterFor(['requests', 'request_count', 'calls'], 'number'), showSorterTooltip: false, render: (_value, row) => asNumber(pick(row, 'requests', 'request_count', 'calls')).toLocaleString('ko-KR') },
+    { title: '성공률', key: 'success_rate', width: 100, sorter: sorterBy(successRate, 'number'), showSorterTooltip: false, render: (_value, row) => { const rate = successRate(row); return rate === undefined ? '수집 불가' : `${rate.toLocaleString('ko-KR', { maximumFractionDigits: 1 })}%` } },
+    { title: 'P95', key: 'p95', width: 100, sorter: sorterFor(['p95_ms', 'latency_p95_ms'], 'number'), showSorterTooltip: false, render: (_value, row) => pick(row, 'p95_ms', 'latency_p95_ms') === undefined ? '수집 불가' : `${asNumber(pick(row, 'p95_ms', 'latency_p95_ms')).toLocaleString('ko-KR')}ms` },
     { title: 'Input tokens', key: 'input', width: 130, render: (_value, row) => tokenText(pick(row, 'input_tokens')) },
     { title: 'Output tokens', key: 'output', width: 135, render: (_value, row) => tokenText(pick(row, 'output_tokens')) },
-    { title: '추정 비용', key: 'cost', width: 130, render: (_value, row) => money(pick(row, 'estimated_cost', 'cost')) },
+    { title: '추정 비용', key: 'cost', width: 130, sorter: sorterFor(['estimated_cost', 'cost'], 'number'), showSorterTooltip: false, render: (_value, row) => money(pick(row, 'estimated_cost', 'cost')) },
   ]
 
   const trendOption: EChartsOption = useMemo(() => ({

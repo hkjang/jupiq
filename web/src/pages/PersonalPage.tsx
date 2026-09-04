@@ -10,6 +10,7 @@ import { useList } from '../hooks/useList'
 import type { ApiKey, ApiRecord } from '../types'
 import { asText, formatDate, pick, statusTone } from '../utils/format'
 import { stableRowKey } from '../utils/rowKey'
+import { sorterFor } from '../utils/sorting'
 
 export function PersonalPage() {
   const { message, modal } = App.useApp()
@@ -120,12 +121,12 @@ export function PersonalPage() {
   }
 
   const keyColumns: TableColumnsType<ApiKey> = [
-    { title: '이름', dataIndex: 'name', key: 'name', width: 170 },
+    { title: '이름', dataIndex: 'name', key: 'name', width: 170, sorter: sorterFor(['name']), showSorterTooltip: false },
     { title: '키 식별자', key: 'prefix', width: 150, render: (_value, row) => <code>{asText(pick(row, 'prefix', 'key_prefix'))}••••</code> },
     { title: '권한', key: 'permissions', width: 260, render: (_value, row) => <Space wrap size={[0, 4]}>{(Array.isArray(row.permissions) ? row.permissions : Array.isArray(row.scopes) ? row.scopes as string[] : []).map((permission) => <Tag key={permission}>{permission}</Tag>)}</Space> },
-    { title: '상태', key: 'status', width: 100, render: (_value, row) => <Tag color={statusTone(row.status)}>{asText(row.status, '활성')}</Tag> },
-    { title: '최근 사용', key: 'last_used_at', width: 180, render: (_value, row) => formatDate(row.last_used_at) },
-    { title: '만료', key: 'expires_at', width: 180, render: (_value, row) => formatDate(row.expires_at) },
+    { title: '상태', key: 'status', width: 100, sorter: sorterFor(['status']), showSorterTooltip: false, render: (_value, row) => <Tag color={statusTone(row.status)}>{asText(row.status, '활성')}</Tag> },
+    { title: '최근 사용', key: 'last_used_at', width: 180, sorter: sorterFor(['last_used_at'], 'date'), showSorterTooltip: false, render: (_value, row) => formatDate(row.last_used_at) },
+    { title: '만료', key: 'expires_at', width: 180, sorter: sorterFor(['expires_at'], 'date'), showSorterTooltip: false, render: (_value, row) => formatDate(row.expires_at) },
     { title: '작업', key: 'actions', fixed: 'right', width: 150, render: (_value, row) => <Space><Button size="small" icon={<ReloadOutlined />} onClick={() => rotateKey(row)}>회전</Button><Button size="small" danger icon={<DeleteOutlined />} onClick={() => revokeKey(row)}>폐기</Button></Space> },
   ]
 

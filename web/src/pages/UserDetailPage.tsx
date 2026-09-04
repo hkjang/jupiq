@@ -37,6 +37,7 @@ import { useApi } from '../hooks/useApi'
 import type { ApiRecord } from '../types'
 import { asNumber, asText, formatBytes, formatDate, formatDuration, normalizePercentValue, pick, statusTone } from '../utils/format'
 import { stableRowKey } from '../utils/rowKey'
+import { sorterFor } from '../utils/sorting'
 import { normalizeUserDetail, periodSummary, records, type UsagePeriod } from '../utils/userDetail'
 
 const periodLabels: Record<UsagePeriod, string> = { day: '일', week: '주', month: '월' }
@@ -111,13 +112,13 @@ function OverviewTab({ view, gpuEnabled }: { view: ReturnType<typeof normalizeUs
 
 function HubsTab({ rows }: { rows: ApiRecord[] }) {
   const columns: TableColumnsType<ApiRecord> = [
-    { title: 'Hub', key: 'hub', width: 180, render: (_value, row) => asText(pick(row, 'hub_name', 'name')) },
+    { title: 'Hub', key: 'hub', width: 180, sorter: sorterFor(['hub_name', 'name']), showSorterTooltip: false, render: (_value, row) => asText(pick(row, 'hub_name', 'name')) },
     { title: '망', key: 'network', width: 130, render: (_value, row) => asText(pick(row, 'network', 'network_name')) },
     { title: 'Hub 상태', key: 'hub_status', width: 110, render: (_value, row) => <Tag color={statusTone(row.hub_status)}>{stateLabel(row.hub_status)}</Tag> },
     { title: '버전', key: 'hub_version', width: 100, render: (_value, row) => asText(row.hub_version) },
     { title: '관리자', key: 'admin', width: 100, render: (_value, row) => <Tag>{Boolean(row.admin) ? '관리자' : '사용자'}</Tag> },
     { title: '상태', key: 'active', width: 100, render: (_value, row) => <Tag color={Boolean(row.active ?? true) ? 'success' : 'default'}>{Boolean(row.active ?? true) ? '활성' : '비활성'}</Tag> },
-    { title: '최근 활동', key: 'last_activity', width: 180, render: (_value, row) => formatDate(pick(row, 'last_activity_at', 'last_activity')) },
+    { title: '최근 활동', key: 'last_activity', width: 180, sorter: sorterFor(['last_activity_at', 'last_activity'], 'date'), showSorterTooltip: false, render: (_value, row) => formatDate(pick(row, 'last_activity_at', 'last_activity')) },
     { title: '마지막 동기화', key: 'synced_at', width: 180, render: (_value, row) => formatDate(row.synced_at) },
   ]
   return rows.length ? <Table<ApiRecord> rowKey={(row) => stableRowKey(row, pick(row, 'hub_id', 'id', 'hub_name', 'name'))} columns={columns} dataSource={rows} pagination={false} scroll={{ x: 900 }} /> : <Empty description="연결된 Hub 계정이 없습니다." />
@@ -125,10 +126,10 @@ function HubsTab({ rows }: { rows: ApiRecord[] }) {
 
 function ServersTab({ current, history, gpuEnabled }: { current: ApiRecord[]; history: ApiRecord[]; gpuEnabled: boolean }) {
   const columns: TableColumnsType<ApiRecord> = [
-    { title: 'Hub', key: 'hub', width: 150, render: (_value, row) => asText(pick(row, 'hub_name', 'hub')) },
-    { title: '서버', key: 'server', width: 150, render: (_value, row) => asText(pick(row, 'server_name', 'name'), '기본 서버') },
-    { title: '상태', key: 'status', width: 110, render: (_value, row) => <Tag color={statusTone(row.status)}>{stateLabel(row.status)}</Tag> },
-    { title: '실행시간', key: 'runtime', width: 130, render: (_value, row) => runtimeOf(row) },
+    { title: 'Hub', key: 'hub', width: 150, sorter: sorterFor(['hub_name', 'hub']), showSorterTooltip: false, render: (_value, row) => asText(pick(row, 'hub_name', 'hub')) },
+    { title: '서버', key: 'server', width: 150, sorter: sorterFor(['server_name', 'name']), showSorterTooltip: false, render: (_value, row) => asText(pick(row, 'server_name', 'name'), '기본 서버') },
+    { title: '상태', key: 'status', width: 110, sorter: sorterFor(['status']), showSorterTooltip: false, render: (_value, row) => <Tag color={statusTone(row.status)}>{stateLabel(row.status)}</Tag> },
+    { title: '실행시간', key: 'runtime', width: 130, sorter: sorterFor(['runtime_seconds', 'running_seconds', 'started_at'], 'number'), showSorterTooltip: false, render: (_value, row) => runtimeOf(row) },
     { title: 'CPU', key: 'cpu', width: 100, render: (_value, row) => hasValue(pick(row, 'cpu_cores', 'cpu')) ? `${asNumber(pick(row, 'cpu_cores', 'cpu')).toLocaleString('ko-KR')} Core` : '—' },
     { title: 'RAM', key: 'memory', width: 110, render: (_value, row) => hasValue(pick(row, 'memory_bytes', 'memory')) ? formatBytes(pick(row, 'memory_bytes', 'memory')) : '—' },
     ...(gpuEnabled ? [{ title: 'GPU', key: 'gpu', width: 90, render: (_value: unknown, row: ApiRecord) => hasValue(pick(row, 'gpu_count', 'gpus')) ? `${asNumber(pick(row, 'gpu_count', 'gpus'))}장` : '—' }] : []),

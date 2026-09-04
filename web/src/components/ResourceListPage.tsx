@@ -27,6 +27,7 @@ import type { ApiRecord } from '../types'
 import { asNumber, asText, formatBytes, formatDate, formatPercent, pick, statusTone } from '../utils/format'
 import { hasPermissionForTargetMode } from '../utils/permissions'
 import { stableRowKey } from '../utils/rowKey'
+import { sortKindForFormat, sorterFor } from '../utils/sorting'
 import { AsyncState } from './AsyncState'
 import { PageHeader } from './PageHeader'
 
@@ -38,6 +39,7 @@ export interface ResourceColumn {
   format?: FieldFormat
   width?: number
   suffix?: string
+  sortable?: boolean
   render?: (value: unknown, record: ApiRecord) => ReactNode
 }
 
@@ -278,6 +280,8 @@ export function ResourceListPage({ title, description, endpoint, columns, emptyD
       title: column.title,
       key: column.keys.join('-'),
       width: column.width,
+      sorter: column.sortable === false ? undefined : sorterFor(column.keys, sortKindForFormat(column.format)),
+      showSorterTooltip: false,
       render: (_value, record) => {
         const value = pick(record, ...column.keys)
         return column.render ? column.render(value, record) : renderValue(value, column.format, column.suffix)

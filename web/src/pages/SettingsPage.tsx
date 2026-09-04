@@ -53,6 +53,7 @@ import {
   type RoleBindingsFormValue,
 } from '../utils/roleBindings'
 import { stableRowKey } from '../utils/rowKey'
+import { sorterFor } from '../utils/sorting'
 import { resolveOidcSettings } from '../utils/settings'
 import { AsyncState } from '../components/AsyncState'
 import { PageHeader } from '../components/PageHeader'
@@ -308,8 +309,8 @@ function RoleManager({ canWrite, canAssign }: { canWrite: boolean; canAssign: bo
       <Typography.Paragraph type="secondary">역할별 permission을 변경하면 다음 인증부터 적용됩니다. 시스템 역할은 삭제할 수 없고, 최고 관리자 전체 권한(*)과 마지막 최고 관리자 할당은 보호됩니다.</Typography.Paragraph>
       {error && <Alert type="error" showIcon message="역할을 불러오지 못했습니다" description={error.message} action={<Button onClick={() => void reload()}>다시 시도</Button>} />}
       <Table<ApiRecord> rowKey={(row) => stableRowKey(row, row.id)} loading={loading} dataSource={roleRows} pagination={false} scroll={{ x: 900 }} columns={[
-        { title: '역할 키', dataIndex: 'key', width: 180, render: (value, row) => <Space><strong>{asText(value)}</strong>{Boolean(row.system) && <Tag color="blue">시스템</Tag>}</Space> },
-        { title: '표시 이름', dataIndex: 'name', width: 180 },
+        { title: '역할 키', dataIndex: 'key', width: 180, sorter: sorterFor(['key']), showSorterTooltip: false, render: (value, row) => <Space><strong>{asText(value)}</strong>{Boolean(row.system) && <Tag color="blue">시스템</Tag>}</Space> },
+        { title: '표시 이름', dataIndex: 'name', width: 180, sorter: sorterFor(['name']), showSorterTooltip: false },
         { title: '설명', dataIndex: 'description', width: 240 },
         { title: '세부 권한', dataIndex: 'permissions', render: (value) => <Space wrap size={[0, 4]}>{(Array.isArray(value) ? value : []).map((permission) => <Tag key={String(permission)}>{String(permission)}</Tag>)}</Space> },
         ...(canWrite ? [{ title: '작업', key: 'actions', fixed: 'right' as const, width: 120, render: (_value: unknown, row: ApiRecord) => <Space><Button aria-label="역할 편집" icon={<EditOutlined />} onClick={() => showRole(row)} />{!row.system && <Popconfirm title="이 역할을 삭제할까요?" description="할당된 사용자의 해당 역할도 제거됩니다." okText="삭제" cancelText="취소" onConfirm={() => void deleteRole(row)}><Button aria-label="역할 삭제" danger icon={<DeleteOutlined />} /></Popconfirm>}</Space> }] : []),
@@ -319,8 +320,8 @@ function RoleManager({ canWrite, canAssign }: { canWrite: boolean; canAssign: bo
       <Typography.Paragraph type="secondary">Bootstrap·OIDC 사용자를 포함한 서비스 계정에 전역 또는 Hub·부서 제한 역할을 할당합니다.</Typography.Paragraph>
       <Alert className="data-note" type="info" showIcon message="제한 범위는 Hub·사용자·서버 관리 API에 적용됩니다" description="설정, 역할, 로컬 사용자, 감사로그, 대시보드·통계·메트릭·GPU와 기타 리소스 API는 현재 전역 권한만 허용합니다." />
       <Table<ApiRecord> rowKey={(row) => stableRowKey(row, row.id)} loading={usersLoading} dataSource={users} pagination={{ current: usersPage, pageSize: usersPageSize, total: usersTotal, showSizeChanger: true, onChange: (page, size) => { setUsersPage(size !== usersPageSize ? 1 : page); setUsersPageSize(size) } }} scroll={{ x: 860 }} columns={[
-        { title: '사용자', dataIndex: 'username', width: 180, render: (value, row) => <Space direction="vertical" size={0}><strong>{asText(value)}</strong><Typography.Text type="secondary">{asText(row.auth_source)}</Typography.Text></Space> },
-        { title: '이름', dataIndex: 'display_name', width: 180 },
+        { title: '사용자', dataIndex: 'username', width: 180, sorter: sorterFor(['username']), showSorterTooltip: false, render: (value, row) => <Space direction="vertical" size={0}><strong>{asText(value)}</strong><Typography.Text type="secondary">{asText(row.auth_source)}</Typography.Text></Space> },
+        { title: '이름', dataIndex: 'display_name', width: 180, sorter: sorterFor(['display_name']), showSorterTooltip: false },
         { title: '역할·적용 범위', key: 'roles', render: (_value, row) => {
           const bindings = roleBindingsFromUser(row, roleRows)
           return <Space direction="vertical" size={6} style={{ width: '100%' }}>

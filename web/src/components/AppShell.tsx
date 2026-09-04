@@ -22,8 +22,8 @@ import {
   TeamOutlined,
   UserOutlined,
 } from '@ant-design/icons'
-import { Avatar, Button, Drawer, Dropdown, Flex, Grid, Input, Layout, Menu, Space, Tag, type MenuProps } from 'antd'
-import { useMemo, useState, type ReactNode } from 'react'
+import { Avatar, Button, Drawer, Flex, Grid, Input, Layout, Menu, Space, Tag, type MenuProps } from 'antd'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { canAccessNavigationPath, canUseGlobalSearch, firstAccessiblePath, selectedNavigationPath, serviceVersionLabel } from '../utils/navigation'
@@ -64,6 +64,21 @@ export function AppShell({ children }: { children: ReactNode }) {
   const screens = Grid.useBreakpoint()
   const desktop = Boolean(screens.lg)
   const [drawerOpen, setDrawerOpen] = useState(false)
+  // The profile menu is rendered in the header's own DOM and toggled by state.
+  // It was an antd Dropdown, which positions a portal popup through
+  // rc-trigger; in at least one deployment every such popup stayed unreachable
+  // while ordinary in-tree buttons worked, so the menu no longer depends on it.
+  const [profileOpen, setProfileOpen] = useState(false)
+  const profileRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!profileOpen) return
+    const onPointerDown = (event: MouseEvent) => { if (!profileRef.current?.contains(event.target as Node)) setProfileOpen(false) }
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') setProfileOpen(false) }
+    document.addEventListener('mousedown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => { document.removeEventListener('mousedown', onPointerDown); document.removeEventListener('keydown', onKeyDown) }
+  }, [profileOpen])
+  useEffect(() => { setProfileOpen(false) }, [location.pathname, location.search])
   const [collapsed, setCollapsed] = useState(() => {
     try { return window.localStorage?.getItem('jupiq.sidebar.collapsed') === 'true' } catch { return false }
   })
@@ -160,12 +175,17 @@ export function AppShell({ children }: { children: ReactNode }) {
             <Space size={8}>
               {canGlobalSearch && <Button className="mobile-search-button" type="text" icon={<SearchOutlined />} aria-label="통합 검색 열기" onClick={() => navigate('/search')} />}
               {hasGlobalPermission('notification:read') && <Button type="text" icon={<BellOutlined />} aria-label="알림 센터" onClick={() => navigate('/notifications')} />}
-              <Dropdown menu={{ items: profileItems }} trigger={['click']} overlayClassName="profile-dropdown" placement="bottomRight">
-                <Button className="profile-trigger" type="text" aria-label="사용자 메뉴 열기">
+              <div className="profile-menu" ref={profileRef}>
+                <Button className="profile-trigger" type="text" aria-label="사용자 메뉴 열기" aria-haspopup="menu" aria-expanded={profileOpen} onClick={() => setProfileOpen((open) => !open)}>
                   <Avatar icon={<UserOutlined />} />
                   {desktop && <span>{user?.display_name || user?.name || user?.username}</span>}
                 </Button>
-              </Dropdown>
+                {profileOpen && (
+                  <div className="profile-panel" role="menu" aria-label="사용자 메뉴">
+                    <Menu mode="vertical" selectable={false} items={profileItems} onClick={() => setProfileOpen(false)} />
+                  </div>
+                )}
+              </div>
             </Space>
           </Flex>
         </Header>

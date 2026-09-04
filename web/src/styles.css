@@ -53,10 +53,10 @@ a { color: inherit; }
 .app-header > .ant-flex { height: 100%; }
 .global-search { width: min(560px, 45vw); }
 .profile-trigger { display: inline-flex; align-items: center; gap: 8px; height: 44px; }
-.profile-dropdown .ant-dropdown-menu { min-width: 280px; max-height: min(520px, 72vh); overflow-y: auto; padding: 8px; scrollbar-width: thin; scrollbar-color: #8da0bd #eef2f7; }
-.profile-dropdown .ant-dropdown-menu::-webkit-scrollbar { width: 9px; }
-.profile-dropdown .ant-dropdown-menu::-webkit-scrollbar-track { background: #eef2f7; border-radius: 999px; }
-.profile-dropdown .ant-dropdown-menu::-webkit-scrollbar-thumb { background: linear-gradient(#64748b, #94a3b8); border: 2px solid #eef2f7; border-radius: 999px; }
+.profile-menu { position: relative; }
+.profile-panel { position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; min-width: 280px; max-height: min(520px, 72vh); overflow-y: auto; padding: 8px; border: 1px solid #e5eaf1; border-radius: 12px; background: #fff; box-shadow: 0 12px 32px rgba(15, 23, 42, .14); }
+.profile-panel .ant-menu { border-inline-end: 0 !important; background: transparent; }
+.profile-panel .ant-menu-item { height: 40px; line-height: 40px; margin-inline: 0; }
 .profile-summary { min-width: 230px; display: flex; flex-direction: column; gap: 2px; padding: 4px 2px; }
 .profile-summary strong { color: #172033; font-size: 16px; }
 .profile-summary span { color: #64748b; font-size: 13px; }
