@@ -36,10 +36,16 @@ export function buildUsageOverlay(value: ApiRecord, filters: DashboardFilters): 
     if (['cpu', 'cpu_cores', 'cpu_usage'].includes(metric)) current.cpu_cores = asNumber(current.cpu_cores) + amount
     buckets.set(bucket, current)
   }
+  // The overlay is spread over the /dashboard payload, so a key it returns
+  // replaces what the dashboard already had. Only override the trend and the
+  // top-user list when the usage API actually supplied rows; an empty usage
+  // response used to blank both charts even though /dashboard had filled them.
+  const trend = [...buckets.values()].sort((a, b) => asText(a.timestamp).localeCompare(asText(b.timestamp)))
+  const topUsers = rows(value.top_users)
   return {
     usage_stats: value,
-    usage_trend: [...buckets.values()].sort((a, b) => asText(a.timestamp).localeCompare(asText(b.timestamp))),
-    top_users: rows(value.top_users),
+    ...(trend.length ? { usage_trend: trend } : {}),
+    ...(topUsers.length ? { top_users: topUsers } : {}),
     usage_stale: Boolean(value.stale),
   }
 }
