@@ -31,7 +31,7 @@
         "name": "jupiq",
         "applicationCategory": "BusinessApplication",
         "operatingSystem": "Linux, Docker",
-        "softwareVersion": "1.4.3",
+        "softwareVersion": "1.4.4",
         "url": "https://hkjang.github.io/jupiq/",
         "downloadUrl": "https://github.com/hkjang/jupiq/releases",
         "description": "분리된 JupyterHub와 AI 인프라를 통합 관리하는 오프라인망 AI Workspace Control Plane",
@@ -41,7 +41,7 @@
       {
         "@type": "FAQPage",
         "mainEntity": [
-          {"@type": "Question", "name": "인터넷이 없는 망에서도 운영할 수 있나요?", "acceptedAnswer": {"@type": "Answer", "text": "네. 릴리스의 jupiq-v1.4.3.tar.gz를 반입해 docker load로 설치합니다. 런타임에는 접근 가능한 PostgreSQL과 네 환경변수만 필요하며 외부 CDN이나 SaaS에 의존하지 않습니다."}},
+          {"@type": "Question", "name": "인터넷이 없는 망에서도 운영할 수 있나요?", "acceptedAnswer": {"@type": "Answer", "text": "네. 릴리스의 jupiq-v1.4.4.tar.gz를 반입해 docker load로 설치합니다. 런타임에는 접근 가능한 PostgreSQL과 네 환경변수만 필요하며 외부 CDN이나 SaaS에 의존하지 않습니다."}},
           {"@type": "Question", "name": "망이 끊기면 중앙 화면도 멈추나요?", "acceptedAnswer": {"@type": "Answer", "text": "아닙니다. 해당 Hub를 Degraded로 표시하고 마지막 성공 snapshot을 유지합니다. 다음 고정 수집 주기에 다시 시도하며 다른 Hub 수집은 별도 goroutine에서 계속됩니다."}},
           {"@type": "Question", "name": "Notebook 코드나 프롬프트를 수집하나요?", "acceptedAnswer": {"@type": "Answer", "text": "Hub·자원 수집기는 코드·셀 내용·출력·LLM 프롬프트·응답 본문을 수집하지 않습니다. 다만 AI 채팅에 직접 입력한 메시지는 응답 생성을 위해 설정된 Provider로 전달됩니다."}},
           {"@type": "Question", "name": "GPU 모니터링 없이도 쓸 수 있나요?", "acceptedAnswer": {"@type": "Answer", "text": "네. GPU 모니터링은 초기 기본 OFF이며 JupyterHub 사용자·서버·카탈로그·감사 기능과 독립적입니다. ON 전에는 Prometheus와 DCGM 지표를 확인하세요."}},
@@ -218,7 +218,7 @@
     <section class="section white" id="faq">
       <div class="narrow"><div class="center"><p class="eyebrow">FAQ</p><h2>자주 묻는 질문</h2></div>
         <div class="faq" style="margin-top:34px">
-          <details><summary>인터넷이 없는 망에서도 운영할 수 있나요?</summary><p>네. 릴리스의 <code>jupiq-v1.4.3.tar.gz</code>를 반입해 <code>docker load</code>로 설치합니다. 런타임에는 접근 가능한 PostgreSQL과 네 환경변수만 필요하며 외부 CDN이나 SaaS에 의존하지 않습니다.</p></details>
+          <details><summary>인터넷이 없는 망에서도 운영할 수 있나요?</summary><p>네. 릴리스의 <code>jupiq-v1.4.4.tar.gz</code>를 반입해 <code>docker load</code>로 설치합니다. 런타임에는 접근 가능한 PostgreSQL과 네 환경변수만 필요하며 외부 CDN이나 SaaS에 의존하지 않습니다.</p></details>
           <details><summary>망이 끊기면 중앙 화면도 멈추나요?</summary><p>아닙니다. 해당 Hub를 Degraded로 표시하고 마지막 성공 snapshot을 유지합니다. 다음 고정 수집 주기에 다시 시도하며 다른 Hub 수집은 별도 goroutine에서 계속됩니다.</p></details>
           <details><summary>Notebook 코드나 프롬프트를 수집하나요?</summary><p>Hub·자원 수집기는 코드·셀 내용·출력·LLM 프롬프트·응답 본문을 수집하지 않습니다. 다만 AI 채팅에 직접 입력한 메시지는 응답 생성을 위해 설정된 Provider로 전달됩니다.</p></details>
           <details><summary>GPU 모니터링 없이도 쓸 수 있나요?</summary><p>네. GPU 모니터링은 초기 기본 OFF이며 JupyterHub 사용자·서버·카탈로그·감사 기능과 독립적입니다. ON 전에는 Prometheus와 DCGM 지표를 확인하세요.</p></details>
@@ -238,7 +238,7 @@
       <div><h3>제품</h3><a href="./features/">기능</a><a href="./screenshots/">전체 화면</a><a href="./architecture/">아키텍처</a><a href="./security/">보안</a></div>
       <div><h3>가이드</h3><a href="./install/">설치</a><a href="./offline/">오프라인 운영</a><a href="./admin-guide/">관리자</a></div>
       <div><h3>개발자</h3><a href="./api-mcp/">API·MCP</a><a href="./releases/">릴리스</a><a href="https://github.com/hkjang/jupiq">GitHub</a></div>
-    </div><div class="footer-bottom"><span>© <span data-year>2026</span> jupiq contributors · MIT License</span><span>Version 1.4.3</span></div></div>
+    </div><div class="footer-bottom"><span>© <span data-year>2026</span> jupiq contributors · MIT License</span><span>Version 1.4.4</span></div></div>
   </footer>
 </body>
 </html>
