@@ -58,6 +58,11 @@ function renderPage(props: Partial<Parameters<typeof ResourceListPage>[0]> = {})
   )
 }
 
+// A full antd Table plus userEvent interaction takes a couple of seconds
+// locally and more on a shared CI runner, so these get an explicit budget
+// instead of the 5s default they were only just fitting inside.
+const INTERACTION_TIMEOUT = 30_000
+
 describe('ResourceListPage 작업 컬럼', () => {
   beforeEach(() => {
     request.mockReset()
@@ -73,10 +78,10 @@ describe('ResourceListPage 작업 컬럼', () => {
       expect(trigger.className).not.toContain('ant-btn-loading')
       expect(trigger).toBeEnabled()
     }
-  })
+  }, INTERACTION_TIMEOUT)
 
   it('작업 버튼을 누르면 조회·수정 메뉴가 열리고 수정 화면이 나타난다', async () => {
-    const user = userEvent.setup()
+    const user = userEvent.setup({ delay: null })
     renderPage()
     const [trigger] = await screen.findAllByLabelText('작업 메뉴 열기')
     await user.click(trigger)
@@ -84,10 +89,10 @@ describe('ResourceListPage 작업 컬럼', () => {
     expect(screen.getByText('다시 실행')).toBeInTheDocument()
     await user.click(screen.getByText('수정'))
     await waitFor(() => expect(screen.getByText('감사 로그 수정')).toBeVisible())
-  })
+  }, INTERACTION_TIMEOUT)
 
   it('행 작업 중에도 목록을 언마운트하지 않고 유지한다', async () => {
-    const user = userEvent.setup()
+    const user = userEvent.setup({ delay: null })
     let resolveAction: (value: unknown) => void = () => {}
     request.mockImplementation(() => new Promise((resolve) => { resolveAction = resolve }))
     renderPage()
@@ -97,5 +102,5 @@ describe('ResourceListPage 작업 컬럼', () => {
     expect(screen.getByText('auth.login')).toBeInTheDocument()
     resolveAction({ success: true })
     await waitFor(() => expect(screen.getByText('auth.login')).toBeInTheDocument())
-  })
+  }, INTERACTION_TIMEOUT)
 })
