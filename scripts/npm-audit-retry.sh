@@ -29,4 +29,20 @@ for attempt in $(seq 1 "${attempts}"); do
 done
 
 echo "npm audit: registry audit endpoint가 ${attempts}회 모두 응답하지 않았습니다." >&2
+
+# Outage fallback. `npm ci` on this same job already ran npm's own advisory
+# scan (bulk endpoint) and printed its verdict; that log is handed in via
+# NPM_CI_LOG. The step passes only when that verdict is exactly zero
+# vulnerabilities, and it says so loudly in the job summary. Any reported
+# vulnerability - from npm ci or from an audit attempt above - still fails.
+ci_log="${NPM_CI_LOG:-}"
+if [[ -n "${ci_log}" && -r "${ci_log}" ]] && grep -qE '^found 0 vulnerabilities' "${ci_log}" \
+   && ! grep -qiE '[1-9][0-9]* (low|moderate|high|critical)' "${ci_log}"; then
+  note="npm audit endpoint 장애로 quick-audit을 완료하지 못했지만, 같은 job의 npm ci 취약점 점검은 'found 0 vulnerabilities'였습니다. 이 결과를 근거로 통과합니다."
+  echo "::warning title=npm audit endpoint unavailable::${note}"
+  [[ -n "${GITHUB_STEP_SUMMARY:-}" ]] && printf '## ⚠ npm audit endpoint 장애\n\n%s\n' "${note}" >> "${GITHUB_STEP_SUMMARY}"
+  echo "npm audit: ${note}" >&2
+  exit 0
+fi
+echo "npm audit: npm ci 점검 결과를 확인할 수 없어 실패합니다 (NPM_CI_LOG='${ci_log}')." >&2
 exit 1

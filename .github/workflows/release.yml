@@ -79,8 +79,8 @@ jobs:
             go test -count=1 -p=1 -run Integration ./internal/store ./internal/api
           node scripts/check-screenshots.mjs
           cd web
-          npm ci
-          bash ../scripts/npm-audit-retry.sh high
+          npm ci 2>&1 | tee "${RUNNER_TEMP}/npm-ci.log"
+          NPM_CI_LOG="${RUNNER_TEMP}/npm-ci.log" bash ../scripts/npm-audit-retry.sh high
           npm run lint
           npm test
           npm run build

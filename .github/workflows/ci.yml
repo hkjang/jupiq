@@ -75,8 +75,10 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - name: 의존성 설치
-        run: npm ci
+        run: npm ci 2>&1 | tee "${RUNNER_TEMP}/npm-ci.log"
       - name: 프런트엔드 취약점 검사
+        env:
+          NPM_CI_LOG: ${{ runner.temp }}/npm-ci.log
         run: bash ../scripts/npm-audit-retry.sh high
       - name: 제품 화면 정합성 확인
         working-directory: .
