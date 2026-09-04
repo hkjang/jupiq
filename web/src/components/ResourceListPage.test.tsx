@@ -70,24 +70,23 @@ describe('ResourceListPage 작업 컬럼', () => {
     requestList.mockResolvedValue({ data: identifierlessRows, meta: { total: identifierlessRows.length } })
   })
 
-  it('식별자가 없는 행에서도 작업 메뉴가 로딩 상태로 잠기지 않는다', async () => {
+  it('식별자가 없는 행에서도 작업 버튼이 항상 보이고 잠기지 않는다', async () => {
     renderPage()
-    const triggers = await screen.findAllByLabelText('작업 메뉴 열기')
-    expect(triggers).toHaveLength(identifierlessRows.length)
-    for (const trigger of triggers) {
-      expect(trigger.className).not.toContain('ant-btn-loading')
-      expect(trigger).toBeEnabled()
+    const editButtons = await screen.findAllByLabelText('수정')
+    expect(editButtons).toHaveLength(identifierlessRows.length)
+    for (const button of [...editButtons, ...screen.getAllByLabelText('다시 실행')]) {
+      expect(button.className).not.toContain('ant-btn-loading')
+      expect(button).toBeEnabled()
     }
+    // No menu, no portal: the actions are plain buttons on the row itself.
+    expect(screen.queryByLabelText('작업 메뉴 열기')).toBeNull()
   }, INTERACTION_TIMEOUT)
 
-  it('작업 버튼을 누르면 조회·수정 메뉴가 열리고 수정 화면이 나타난다', async () => {
+  it('수정 버튼을 누르면 바로 수정 화면이 나타난다', async () => {
     const user = userEvent.setup({ delay: null })
     renderPage()
-    const [trigger] = await screen.findAllByLabelText('작업 메뉴 열기')
-    await user.click(trigger)
-    await waitFor(() => expect(screen.getByText('수정')).toBeVisible())
-    expect(screen.getByText('다시 실행')).toBeInTheDocument()
-    await user.click(screen.getByText('수정'))
+    const [edit] = await screen.findAllByLabelText('수정')
+    await user.click(edit)
     await waitFor(() => expect(screen.getByText('감사 로그 수정')).toBeVisible())
   }, INTERACTION_TIMEOUT)
 
@@ -96,10 +95,11 @@ describe('ResourceListPage 작업 컬럼', () => {
     let resolveAction: (value: unknown) => void = () => {}
     request.mockImplementation(() => new Promise((resolve) => { resolveAction = resolve }))
     renderPage()
-    const [trigger] = await screen.findAllByLabelText('작업 메뉴 열기')
-    await user.click(trigger)
-    await user.click(await screen.findByText('다시 실행'))
+    const [retry] = await screen.findAllByLabelText('다시 실행')
+    await user.click(retry)
     expect(screen.getByText('auth.login')).toBeInTheDocument()
+    // Only the acted-on row's button spins; the rest stay put.
+    expect(retry.className).toContain('ant-btn-loading')
     resolveAction({ success: true })
     await waitFor(() => expect(screen.getByText('auth.login')).toBeInTheDocument())
   }, INTERACTION_TIMEOUT)

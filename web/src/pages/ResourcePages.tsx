@@ -1,3 +1,4 @@
+import { ApiOutlined, PlayCircleOutlined, PoweroffOutlined, ReloadOutlined, SyncOutlined } from '@ant-design/icons'
 import { Alert, Button, Result, Tag } from 'antd'
 import { Link } from 'react-router-dom'
 import { jsonBody, request } from '../api/client'
@@ -31,8 +32,8 @@ const hubFields: ResourceField[] = [
   { name: 'enabled', label: '중앙 관리 사용', type: 'switch', initialValue: true },
 ]
 const hubActions: RowAction[] = [
-  { key: 'test', label: '연결 테스트', path: (row) => `/hubs/${id(row)}/test`, permission: 'hubs:write' },
-  { key: 'sync', label: '지금 동기화', path: (row) => `/hubs/${id(row)}/sync`, permission: 'hubs:write' },
+  { key: 'test', label: '연결 테스트', icon: <ApiOutlined />, path: (row) => `/hubs/${id(row)}/test`, permission: 'hubs:write' },
+  { key: 'sync', label: '지금 동기화', icon: <SyncOutlined />, path: (row) => `/hubs/${id(row)}/sync`, permission: 'hubs:write' },
 ]
 
 export function HubsPage() {
@@ -89,9 +90,9 @@ export function UsersPage() {
 }
 
 const serverActions: RowAction[] = [
-  { key: 'start', label: '서버 시작', path: (row) => `/servers/${id(row)}/start`, permission: 'servers:operate', visible: (row) => !/running|starting/i.test(asText(pick(row, 'status'))) },
-  { key: 'stop', label: '서버 종료', path: (row) => `/servers/${id(row)}/stop`, permission: 'servers:operate', danger: true, confirm: '사용자 작업이 중단될 수 있습니다. 서버를 종료하시겠습니까?', visible: (row) => /running|active/i.test(asText(pick(row, 'status'))) },
-  { key: 'restart', label: '서버 재시작', path: (row) => `/servers/${id(row)}/restart`, permission: 'servers:operate', confirm: '현재 커널 연결이 끊어집니다. 서버를 재시작하시겠습니까?', visible: (row) => /running|active/i.test(asText(pick(row, 'status'))) },
+  { key: 'start', label: '서버 시작', icon: <PlayCircleOutlined />, path: (row) => `/servers/${id(row)}/start`, permission: 'servers:operate', visible: (row) => !/running|starting/i.test(asText(pick(row, 'status'))) },
+  { key: 'stop', label: '서버 종료', icon: <PoweroffOutlined />, path: (row) => `/servers/${id(row)}/stop`, permission: 'servers:operate', danger: true, confirm: '사용자 작업이 중단될 수 있습니다. 서버를 종료하시겠습니까?', visible: (row) => /running|active/i.test(asText(pick(row, 'status'))) },
+  { key: 'restart', label: '서버 재시작', icon: <ReloadOutlined />, path: (row) => `/servers/${id(row)}/restart`, permission: 'servers:operate', confirm: '현재 커널 연결이 끊어집니다. 서버를 재시작하시겠습니까?', visible: (row) => /running|active/i.test(asText(pick(row, 'status'))) },
 ]
 const serverColumns: ResourceColumn[] = [
   { title: '사용자', keys: ['username', 'user_name'], width: 150 },

@@ -8,11 +8,23 @@ import { AuthProvider } from './auth/AuthContext'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import './styles.css'
 
+// Dropdown, Select and Tooltip popups are placed inside the app shell rather
+// than appended to <body>. Body-level popups depend on the document's scroll
+// state, overflow and stacking, and on nothing else in the page interfering
+// with <body> - and in at least one deployment they never became visible while
+// every in-tree control worked. Inside the shell they scroll with the content
+// they belong to. Popups opened from a Modal or Drawer (which are themselves
+// on <body>) find no shell ancestor and keep the default container.
+function popupContainer(trigger?: HTMLElement) {
+  return trigger?.closest<HTMLElement>('.app-content') ?? trigger?.closest<HTMLElement>('.app-layout') ?? document.body
+}
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ErrorBoundary>
       <ConfigProvider
         locale={koKR}
+        getPopupContainer={popupContainer}
         theme={{
           algorithm: theme.defaultAlgorithm,
           token: {

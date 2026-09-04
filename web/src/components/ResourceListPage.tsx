@@ -1,11 +1,10 @@
-import { ApiOutlined, DeleteOutlined, EditOutlined, MoreOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons'
+import { ApiOutlined, DeleteOutlined, EditOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons'
 import {
   Alert,
   App,
   Button,
   Card,
   Drawer,
-  Dropdown,
   Flex,
   Form,
   Input,
@@ -17,7 +16,6 @@ import {
   Table,
   Tag,
   Typography,
-  type MenuProps,
   type TableColumnsType,
 } from 'antd'
 import { useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
@@ -59,6 +57,7 @@ export interface ResourceField {
 export interface RowAction {
   key: string
   label: string
+  icon?: ReactNode
   method?: 'POST' | 'PUT' | 'PATCH' | 'DELETE'
   path: (record: ApiRecord) => string
   danger?: boolean
@@ -145,7 +144,7 @@ export function ResourceListPage({ title, description, endpoint, columns, emptyD
   const [saving, setSaving] = useState(false)
   const [editorTesting, setEditorTesting] = useState(false)
   const [editorTestResult, setEditorTestResult] = useState<(ApiRecord & { success: boolean }) | null>(null)
-  const [actingRow, setActingRow] = useState('')
+  const [acting, setActing] = useState<{ row: string; action: string } | null>(null)
   const [form] = Form.useForm()
   const permitsWrite = !writePermission || hasPermissionForTargetMode(user?.permissions, user?.global_permissions, writePermission, scopeAwareWrite)
   const canModify = Boolean(fields) && permitsWrite
@@ -177,7 +176,7 @@ export function ResourceListPage({ title, description, endpoint, columns, emptyD
 
   const executeAction = async (action: RowAction, record: ApiRecord) => {
     const execute = async () => {
-      setActingRow(rowKeyOf(record))
+      setActing({ row: rowKeyOf(record), action: action.key })
       try {
         const result = await request<ApiRecord | null>(action.path(record), {
           method: action.method || 'POST',
@@ -194,7 +193,7 @@ export function ResourceListPage({ title, description, endpoint, columns, emptyD
       } catch (caught) {
         message.error(caught instanceof Error ? caught.message : `${action.label} 작업에 실패했습니다.`)
       } finally {
-        setActingRow('')
+        setActing(null)
       }
     }
     if (action.confirm) {
@@ -286,48 +285,45 @@ export function ResourceListPage({ title, description, endpoint, columns, emptyD
     }))
     const permittedRowActions = rowActions.filter((action) => !action.permission || hasPermissionForTargetMode(user?.permissions, user?.global_permissions, action.permission, scopeAwareWrite))
     if (canModify || permittedRowActions.length) {
+      // Every row action is a plain, always-visible button. The earlier ⋯ menu
+      // was an antd Dropdown rendered into <body> through a portal, and popups
+      // rendered that way have been unreachable in at least one deployment
+      // where every in-tree control works. A direct button has no popup,
+      // no positioning and nothing to clip - the click either happens or it
+      // doesn't, and it is visible on the row at all times.
+      const buttonCount = permittedRowActions.length + (canModify ? 2 : 0)
       configured.push({
-        title: '작업', key: 'actions', width: 92, fixed: 'right',
+        title: '작업', key: 'actions', width: 24 + buttonCount * 38, fixed: 'right',
         render: (_value, record) => {
+          const rowKey = rowKeyOf(record)
+          const rowBusy = acting?.row === rowKey
           const actions = permittedRowActions.filter((action) => !action.visible || action.visible(record))
-          const busy = Boolean(actingRow) && actingRow === rowKeyOf(record)
-          const menuItems: MenuProps['items'] = [
-            ...actions.map((action) => ({ key: action.key, label: action.label, danger: action.danger, disabled: Boolean(actingRow) })),
-            ...(canModify ? [
-              { type: 'divider' as const },
-              { key: 'edit', icon: <EditOutlined />, label: '수정' },
-              { key: 'delete', icon: <DeleteOutlined />, label: '삭제', danger: true },
-            ] : []),
-          ]
-          // `busy` was `acting.endsWith(rowId(record))`, and rowId is the empty
-          // string for records without an identifier, so `''.endsWith('')` left
-          // every action button on those tables permanently loading - and a
-          // loading antd Button ignores clicks, which is why the menu never
-          // opened. The trigger is also the Dropdown's direct child now instead
-          // of a Tooltip wrapper, so one popup owns the trigger.
           return (
-            <Dropdown menu={{ items: menuItems, onClick: ({ key, domEvent }) => {
-              domEvent.stopPropagation()
-              if (key === 'edit') openEdit(record)
-              else if (key === 'delete') remove(record)
-              else {
-                const action = actions.find((candidate) => candidate.key === key)
-                if (action) void executeAction(action, record)
-              }
-            } }} trigger={['click']} destroyOnHidden>
-              <Button
-                loading={busy}
-                icon={busy ? undefined : <MoreOutlined />}
-                title="작업 메뉴"
-                aria-label="작업 메뉴 열기"
-              />
-            </Dropdown>
+            <Space size={4} className="row-actions">
+              {actions.map((action) => (
+                <Button
+                  key={action.key}
+                  size="small"
+                  danger={action.danger}
+                  icon={action.icon}
+                  loading={rowBusy && acting?.action === action.key}
+                  disabled={Boolean(acting) && !(rowBusy && acting?.action === action.key)}
+                  title={action.label}
+                  aria-label={action.label}
+                  onClick={() => void executeAction(action, record)}
+                >
+                  {action.icon ? undefined : action.label}
+                </Button>
+              ))}
+              {canModify && <Button size="small" icon={<EditOutlined />} disabled={Boolean(acting)} title="수정" aria-label="수정" onClick={() => openEdit(record)} />}
+              {canModify && <Button size="small" danger icon={<DeleteOutlined />} disabled={Boolean(acting)} title="삭제" aria-label="삭제" onClick={() => remove(record)} />}
+            </Space>
           )
         },
       })
     }
     return configured
-  }, [columns, rowActions, actingRow, canModify, scopeAwareWrite, user?.global_permissions, user?.permissions])
+  }, [columns, rowActions, acting, canModify, scopeAwareWrite, user?.global_permissions, user?.permissions])
 
   const updateQuery = (value: string) => {
     setQuery(value)
