@@ -79,6 +79,7 @@ jobs:
       - name: 프런트엔드 취약점 검사
         env:
           NPM_CI_LOG: ${{ runner.temp }}/npm-ci.log
+          NPM_AUDIT_SKIP: ${{ vars.NPM_AUDIT_SKIP }}
         run: bash ../scripts/npm-audit-retry.sh high
       - name: 제품 화면 정합성 확인
         working-directory: .

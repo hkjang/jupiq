@@ -7,6 +7,18 @@
 set -uo pipefail
 
 level="${1:-high}"
+
+# Explicit, one-off bypass: set the NPM_AUDIT_SKIP repository variable to skip
+# the registry audit for a release while npm's audit service is down. It is
+# announced in the job log and summary so the bypass is never silent, and the
+# variable is meant to be removed again immediately after the release.
+if [[ "${NPM_AUDIT_SKIP:-}" == "1" ]]; then
+  note="NPM_AUDIT_SKIP=1: 운영자 결정으로 이번 실행의 npm audit을 건너뜁니다. npm 감사 endpoint 장애 중 일회성 우회이며, 릴리스 후 변수를 제거해야 합니다."
+  echo "::warning title=npm audit skipped by operator::${note}"
+  [[ -n "${GITHUB_STEP_SUMMARY:-}" ]] && printf '## ⚠ npm audit 건너뜀 (운영자 결정)\n\n%s\n' "${note}" >> "${GITHUB_STEP_SUMMARY}"
+  echo "npm audit: ${note}" >&2
+  exit 0
+fi
 attempts="${NPM_AUDIT_ATTEMPTS:-4}"
 per_attempt_timeout="${NPM_AUDIT_TIMEOUT_SECONDS:-90}"
 

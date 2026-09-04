@@ -80,7 +80,7 @@ jobs:
           node scripts/check-screenshots.mjs
           cd web
           npm ci 2>&1 | tee "${RUNNER_TEMP}/npm-ci.log"
-          NPM_CI_LOG="${RUNNER_TEMP}/npm-ci.log" bash ../scripts/npm-audit-retry.sh high
+          NPM_CI_LOG="${RUNNER_TEMP}/npm-ci.log" NPM_AUDIT_SKIP="${{ vars.NPM_AUDIT_SKIP }}" bash ../scripts/npm-audit-retry.sh high
           npm run lint
           npm test
           npm run build
