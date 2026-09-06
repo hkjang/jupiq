@@ -22,11 +22,7 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 			r.Header.Set("X-Request-ID", requestID)
 		}
 		w.Header().Set("X-Request-ID", requestID)
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("Referrer-Policy", "same-origin")
-		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'")
+		setSecurityHeaders(w, r)
 		defer func() {
 			if recovered := recover(); recovered != nil {
 				s.Logger.Error("panic in HTTP handler", slog.Any("panic", recovered), slog.String("stack", string(debug.Stack())), slog.String("request_id", requestID))
@@ -40,6 +36,33 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// contentSecurityPolicy는 SPA와 API 응답 모두에 적용되는 정책이다.
+// default-src만으로는 막히지 않는 세 가지를 명시적으로 닫는다.
+//   - frame-ancestors: X-Frame-Options를 무시하는 최신 브라우저에서도 clickjacking 차단
+//   - base-uri: 주입된 <base>가 상대 경로 자산을 외부로 돌리지 못하게 차단
+//   - form-action: 주입된 <form>이 세션 쿠키가 붙는 요청을 외부로 보내지 못하게 차단
+//
+// OIDC 로그인은 302 redirect라 form-action의 영향을 받지 않는다.
+const contentSecurityPolicy = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+
+// hstsMaxAge는 1년이다. jupiq는 사내 도메인의 한 호스트로 배포되는 경우가 많아
+// includeSubDomains·preload는 붙이지 않는다. 같은 도메인의 다른 서비스까지
+// HTTPS를 강제해 폐쇄망 운영을 막을 수 있기 때문이다.
+const hstsMaxAge = "max-age=31536000"
+
+func setSecurityHeaders(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("X-Frame-Options", "DENY")
+	w.Header().Set("Referrer-Policy", "same-origin")
+	w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+	w.Header().Set("Content-Security-Policy", contentSecurityPolicy)
+	// HTTP로 접근하는 폐쇄망 배포에 HSTS를 남기면 이후 평문 접속이 영구히
+	// 막히므로, TLS로 도달한 요청에만 붙인다.
+	if auth.IsSecureRequest(r) {
+		w.Header().Set("Strict-Transport-Security", hstsMaxAge)
+	}
 }
 
 func scopedAccess(w http.ResponseWriter, r *http.Request, permission string) (store.AccessFilter, bool) {
