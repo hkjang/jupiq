@@ -96,21 +96,21 @@ func TestScopedRoleBindingsFilterBeforePaginationIntegration(t *testing.T) {
 		t.Fatalf("Hub scope leaked another Hub: %#v", hubs)
 	}
 	access := AccessFilter{Groups: []ScopeGroup{{HubIDs: []int64{hubOne}, Departments: []string{"AI"}}}}
-	users, page, err := database.ListManagedUsersWithAccess(ctx, 1, 1, 0, marker, access)
+	users, page, err := database.ListManagedUsersWithAccess(ctx, 1, 1, 0, marker, access, Sort{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if page.Total != 1 || len(users) != 1 || users[0].Username != marker+"-allowed" {
 		t.Fatalf("managed-user scope was applied after pagination or leaked a row: page=%#v users=%#v", page, users)
 	}
-	servers, serverPage, err := database.ListServersWithAccess(ctx, 1, 1, 0, "", marker, access)
+	servers, serverPage, err := database.ListServersWithAccess(ctx, 1, 1, 0, "", marker, access, Sort{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if serverPage.Total != 1 || len(servers) != 1 || servers[0].Username != marker+"-allowed" || servers[0].Department != "AI" {
 		t.Fatalf("server scope was applied after pagination or leaked a row: page=%#v servers=%#v", serverPage, servers)
 	}
-	users, page, err = database.ListManagedUsersWithAccess(ctx, 1, 20, hubTwo, marker, access)
+	users, page, err = database.ListManagedUsersWithAccess(ctx, 1, 20, hubTwo, marker, access, Sort{})
 	if err != nil {
 		t.Fatal(err)
 	}

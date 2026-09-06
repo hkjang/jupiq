@@ -29,7 +29,7 @@ const identifierlessRows: ApiRecord[] = [
 ]
 
 const columns: ResourceColumn[] = [
-  { title: '작업', keys: ['action'] },
+  { title: '작업 유형', keys: ['action'], sortKey: 'action' },
   { title: '행위자', keys: ['actor'] },
 ]
 
@@ -88,6 +88,26 @@ describe('ResourceListPage 작업 컬럼', () => {
     const [edit] = await screen.findAllByLabelText('수정')
     await user.click(edit)
     await waitFor(() => expect(screen.getByText('감사 로그 수정')).toBeVisible())
+  }, INTERACTION_TIMEOUT)
+
+  it('서버 정렬 컬럼을 누르면 sort·order를 붙여 첫 페이지부터 다시 조회한다', async () => {
+    const user = userEvent.setup({ delay: null })
+    renderPage()
+    await screen.findAllByLabelText('수정')
+    const initial = requestList.mock.calls.at(-1)?.[0] as string
+    expect(initial).not.toContain('sort=')
+
+    const sortHeader = () => screen.getAllByRole('columnheader').find((th) => th.textContent?.includes('작업 유형'))!
+    await user.click(sortHeader())
+    await waitFor(() => {
+      const url = requestList.mock.calls.at(-1)?.[0] as string
+      expect(url).toContain('sort=action')
+      expect(url).toContain('order=asc')
+      expect(url).toContain('page=1')
+    })
+
+    await user.click(sortHeader())
+    await waitFor(() => expect(requestList.mock.calls.at(-1)?.[0] as string).toContain('order=desc'))
   }, INTERACTION_TIMEOUT)
 
   it('행 작업 중에도 목록을 언마운트하지 않고 유지한다', async () => {

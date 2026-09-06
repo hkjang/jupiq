@@ -128,3 +128,10 @@ func parseTimeQuery(r *http.Request, name string, fallback time.Time) time.Time 
 func withPrincipal(r *http.Request, p auth.Principal) *http.Request {
 	return r.WithContext(context.WithValue(r.Context(), principalKey, p))
 }
+
+// listSort reads the ordering a list request asked for. The key is validated
+// against a per-endpoint allowlist in the store layer, so anything unknown
+// simply leaves the list in its natural order.
+func listSort(r *http.Request) store.Sort {
+	return store.Sort{Key: r.URL.Query().Get("sort"), Direction: r.URL.Query().Get("order")}
+}

@@ -850,13 +850,13 @@ func (s *Store) RecordAudit(ctx context.Context, event AuditEvent) error {
 	return err
 }
 
-func (s *Store) ListAudit(ctx context.Context, page, pageSize int) ([]map[string]any, Page, error) {
+func (s *Store) ListAudit(ctx context.Context, page, pageSize int, sort Sort) ([]map[string]any, Page, error) {
 	page, pageSize, offset := pageBounds(page, pageSize)
 	var total int
 	if err := s.Pool.QueryRow(ctx, `SELECT count(*) FROM audit_logs`).Scan(&total); err != nil {
 		return nil, Page{}, err
 	}
-	rows, err := s.Pool.Query(ctx, `SELECT id,actor_user_id,actor_username,action,resource_type,resource_id,before_value,after_value,ip_address,result,reason,request_id,created_at FROM audit_logs ORDER BY created_at DESC LIMIT $1 OFFSET $2`, pageSize, offset)
+	rows, err := s.Pool.Query(ctx, `SELECT id,actor_user_id,actor_username,action,resource_type,resource_id,before_value,after_value,ip_address,result,reason,request_id,created_at FROM audit_logs ORDER BY `+orderBy(auditSortColumns, sort, "created_at DESC", "id")+` LIMIT $1 OFFSET $2`, pageSize, offset)
 	if err != nil {
 		return nil, Page{}, err
 	}

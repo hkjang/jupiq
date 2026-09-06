@@ -40,6 +40,9 @@ export interface ResourceColumn {
   width?: number
   suffix?: string
   sortable?: boolean
+  // Sent as ?sort= when the server orders this list. Without it the column
+  // sorts only the rows already on screen.
+  sortKey?: string
   render?: (value: unknown, record: ApiRecord) => ReactNode
 }
 
@@ -135,11 +138,13 @@ export function ResourceListPage({ title, description, endpoint, columns, emptyD
   const deferredQuery = useDeferredValue(query.trim())
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
+  const [sort, setSort] = useState<{ key: string; order: 'asc' | 'desc' } | null>(null)
   const listPath = useMemo(() => {
     const params = new URLSearchParams({ page: String(page), page_size: String(pageSize) })
     if (deferredQuery) params.set('search', deferredQuery)
+    if (sort) { params.set('sort', sort.key); params.set('order', sort.order) }
     return `${endpoint}?${params.toString()}`
-  }, [endpoint, page, pageSize, deferredQuery])
+  }, [endpoint, page, pageSize, deferredQuery, sort])
   const { data, meta, loading, refreshing, error, reload } = useList<ApiRecord>(listPath)
   const [editorOpen, setEditorOpen] = useState(false)
   const [editing, setEditing] = useState<ApiRecord | null>(null)
@@ -280,7 +285,8 @@ export function ResourceListPage({ title, description, endpoint, columns, emptyD
       title: column.title,
       key: column.keys.join('-'),
       width: column.width,
-      sorter: column.sortable === false ? undefined : sorterFor(column.keys, sortKindForFormat(column.format)),
+      sorter: column.sortable === false ? undefined : column.sortKey ? true : sorterFor(column.keys, sortKindForFormat(column.format)),
+      sortOrder: column.sortKey && sort?.key === column.sortKey ? (sort.order === 'desc' ? 'descend' : 'ascend') : undefined,
       showSorterTooltip: false,
       render: (_value, record) => {
         const value = pick(record, ...column.keys)
@@ -411,6 +417,16 @@ export function ResourceListPage({ title, description, endpoint, columns, emptyD
           columns={tableColumns}
           dataSource={data}
           scroll={{ x: Math.max(900, tableColumns.length * 150) }}
+          onChange={(_pagination, _filters, sorter) => {
+            // Only server-ordered columns reach here with a sortKey; the rest
+            // are sorted in place by antd and need no request.
+            const active = Array.isArray(sorter) ? sorter[0] : sorter
+            const key = columns.find((column) => column.keys.join('-') === String(active?.columnKey ?? ''))?.sortKey
+            if (!key) return
+            const next = active?.order === 'ascend' ? { key, order: 'asc' as const } : active?.order === 'descend' ? { key, order: 'desc' as const } : null
+            setSort((current) => (current?.key === next?.key && current?.order === next?.order ? current : next))
+            setPage(1)
+          }}
           pagination={{
             current: page,
             pageSize,

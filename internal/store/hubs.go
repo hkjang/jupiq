@@ -621,10 +621,10 @@ func parseTime(value any) *time.Time {
 }
 
 func (s *Store) ListManagedUsers(ctx context.Context, page, pageSize int, hubID int64, search string) ([]ManagedUser, Page, error) {
-	return s.ListManagedUsersWithAccess(ctx, page, pageSize, hubID, search, AccessFilter{Global: true})
+	return s.ListManagedUsersWithAccess(ctx, page, pageSize, hubID, search, AccessFilter{Global: true}, Sort{})
 }
 
-func (s *Store) ListManagedUsersWithAccess(ctx context.Context, page, pageSize int, hubID int64, search string, access AccessFilter) ([]ManagedUser, Page, error) {
+func (s *Store) ListManagedUsersWithAccess(ctx context.Context, page, pageSize int, hubID int64, search string, access AccessFilter, sort Sort) ([]ManagedUser, Page, error) {
 	page, pageSize, offset := pageBounds(page, pageSize)
 	pattern := "%" + search + "%"
 	departmentSQL := "COALESCE(NULLIF(u.department,''),account.department,'')"
@@ -678,7 +678,7 @@ func (s *Store) ListManagedUsersWithAccess(ctx context.Context, page, pageSize i
 			WHERE s.hub_id=u.hub_id AND s.username=u.username
 		) server_summary ON true
 		WHERE ($1=0 OR u.hub_id=$1) AND ($2='' OR u.username ILIKE $3) AND `+dataAccessSQL+`
-		ORDER BY u.username,u.hub_id LIMIT $4 OFFSET $5`, dataArgs...)
+		ORDER BY `+orderBy(managedUserSortColumns, sort, "u.username,u.hub_id", "u.username,u.hub_id")+` LIMIT $4 OFFSET $5`, dataArgs...)
 	if err != nil {
 		return nil, Page{}, err
 	}
@@ -724,10 +724,10 @@ func managedUserRoles(raw json.RawMessage) []string {
 }
 
 func (s *Store) ListServers(ctx context.Context, page, pageSize int, hubID int64, status, search string) ([]Server, Page, error) {
-	return s.ListServersWithAccess(ctx, page, pageSize, hubID, status, search, AccessFilter{Global: true})
+	return s.ListServersWithAccess(ctx, page, pageSize, hubID, status, search, AccessFilter{Global: true}, Sort{})
 }
 
-func (s *Store) ListServersWithAccess(ctx context.Context, page, pageSize int, hubID int64, status, search string, access AccessFilter) ([]Server, Page, error) {
+func (s *Store) ListServersWithAccess(ctx context.Context, page, pageSize int, hubID int64, status, search string, access AccessFilter, sort Sort) ([]Server, Page, error) {
 	page, pageSize, offset := pageBounds(page, pageSize)
 	pattern := "%" + search + "%"
 	departmentSQL := "COALESCE(NULLIF(u.department,''),account.department,'')"
@@ -740,7 +740,7 @@ func (s *Store) ListServersWithAccess(ctx context.Context, page, pageSize int, h
 	}
 	dataAccessSQL, dataAccessArgs := AccessPredicate(access, "s.hub_id", departmentSQL, 7)
 	dataArgs := append([]any{hubID, status, search, pattern, pageSize, offset}, dataAccessArgs...)
-	rows, err := s.Pool.Query(ctx, `SELECT s.id,s.hub_id,h.name,s.username,COALESCE(NULLIF(u.department,''),account.department,''),s.server_name,s.status,s.started_at,s.last_activity_at,s.url,s.node_name,s.pod_name,s.image,s.cpu_cores,s.memory_bytes,s.gpu_count,s.raw,s.synced_at FROM servers s JOIN hubs h ON h.id=s.hub_id LEFT JOIN managed_users u ON u.id=s.managed_user_id LEFT JOIN users account ON lower(account.username)=lower(s.username) WHERE ($1=0 OR s.hub_id=$1) AND ($2='' OR s.status=$2) AND ($3='' OR s.username ILIKE $4) AND `+dataAccessSQL+` ORDER BY s.synced_at DESC LIMIT $5 OFFSET $6`, dataArgs...)
+	rows, err := s.Pool.Query(ctx, `SELECT s.id,s.hub_id,h.name,s.username,COALESCE(NULLIF(u.department,''),account.department,''),s.server_name,s.status,s.started_at,s.last_activity_at,s.url,s.node_name,s.pod_name,s.image,s.cpu_cores,s.memory_bytes,s.gpu_count,s.raw,s.synced_at FROM servers s JOIN hubs h ON h.id=s.hub_id LEFT JOIN managed_users u ON u.id=s.managed_user_id LEFT JOIN users account ON lower(account.username)=lower(s.username) WHERE ($1=0 OR s.hub_id=$1) AND ($2='' OR s.status=$2) AND ($3='' OR s.username ILIKE $4) AND `+dataAccessSQL+` ORDER BY `+orderBy(serverSortColumns, sort, "s.synced_at DESC", "s.id")+` LIMIT $5 OFFSET $6`, dataArgs...)
 	if err != nil {
 		return nil, Page{}, err
 	}

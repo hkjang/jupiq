@@ -1177,7 +1177,7 @@ func (s *Server) managedUsers(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	items, page, err := s.Store.ListManagedUsersWithAccess(r.Context(), queryInt(r, "page", 1), queryInt(r, "page_size", 20), int64(queryInt(r, "hub_id", 0)), r.URL.Query().Get("search"), access)
+	items, page, err := s.Store.ListManagedUsersWithAccess(r.Context(), queryInt(r, "page", 1), queryInt(r, "page_size", 20), int64(queryInt(r, "hub_id", 0)), r.URL.Query().Get("search"), access, listSort(r))
 	if err != nil {
 		handleStoreError(w, r, err)
 		return
@@ -1249,7 +1249,7 @@ func (s *Server) servers(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	items, page, err := s.Store.ListServersWithAccess(r.Context(), queryInt(r, "page", 1), queryInt(r, "page_size", 20), int64(queryInt(r, "hub_id", 0)), r.URL.Query().Get("status"), r.URL.Query().Get("search"), access)
+	items, page, err := s.Store.ListServersWithAccess(r.Context(), queryInt(r, "page", 1), queryInt(r, "page_size", 20), int64(queryInt(r, "hub_id", 0)), r.URL.Query().Get("status"), r.URL.Query().Get("search"), access, listSort(r))
 	if err != nil {
 		handleStoreError(w, r, err)
 		return
@@ -1575,7 +1575,7 @@ func requireInteractiveKeyManagement(w http.ResponseWriter, r *http.Request) boo
 }
 
 func (s *Server) auditList(w http.ResponseWriter, r *http.Request) {
-	items, page, err := s.Store.ListAudit(r.Context(), queryInt(r, "page", 1), queryInt(r, "page_size", 50))
+	items, page, err := s.Store.ListAudit(r.Context(), queryInt(r, "page", 1), queryInt(r, "page_size", 50), listSort(r))
 	if err != nil {
 		handleStoreError(w, r, err)
 		return

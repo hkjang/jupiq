@@ -16,7 +16,7 @@ const hubColumns: ResourceColumn[] = [
   { title: 'Hub', keys: ['name'], width: 160 },
   { title: '망', keys: ['network', 'network_name'], width: 120 },
   { title: 'URL', keys: ['base_url'], width: 260 },
-  { title: '상태', keys: ['status'], format: 'status', width: 110 },
+  { title: '상태', keys: ['status'], format: 'status', width: 110, sortKey: 'status' },
   { title: '버전', keys: ['version'], width: 100 },
   { title: '사용자', keys: ['user_count', 'users'], format: 'number', width: 90, suffix: '명' },
   { title: '실행 서버', keys: ['running_servers', 'servers'], format: 'number', width: 100, suffix: '대' },
@@ -62,21 +62,21 @@ export function HubsPage() {
 
 function managedUserColumns(canViewDetails: boolean): ResourceColumn[] {
   return [
-    { title: '사용자 ID', keys: ['username', 'user_name'], width: 150, render: (value) => {
+    { title: '사용자 ID', keys: ['username', 'user_name'], width: 150, sortKey: 'username', render: (value) => {
       const username = asText(value, '')
       if (!username) return '—'
       return canViewDetails ? <Link className="text-link" to={`/users/${encodeURIComponent(username)}`}>{username}</Link> : username
     } },
-    { title: '이름', keys: ['display_name', 'name'], width: 130 },
-    { title: '부서', keys: ['department', 'department_name'], width: 140 },
+    { title: '이름', keys: ['display_name', 'name'], width: 130, sortKey: 'display_name' },
+    { title: '부서', keys: ['department', 'department_name'], width: 140, sortKey: 'department' },
     { title: 'Hub', keys: ['hub_name', 'hub'], width: 150 },
     { title: '역할', keys: managedUserFields.roles, format: 'tags', width: 180 },
-    { title: '서버 상태', keys: managedUserFields.serverStatus, format: 'status', width: 110 },
-    { title: '실행 서버', keys: managedUserFields.runningServers, format: 'number', suffix: '대', width: 105 },
-    { title: '총 실행시간', keys: managedUserFields.runtime, width: 125, render: (value) => formatManagedUserRuntime(value) },
+    { title: '서버 상태', keys: managedUserFields.serverStatus, format: 'status', width: 110, sortKey: 'server_status' },
+    { title: '실행 서버', keys: managedUserFields.runningServers, format: 'number', suffix: '대', width: 105, sortKey: 'running_servers' },
+    { title: '총 실행시간', keys: managedUserFields.runtime, width: 125, render: (value) => formatManagedUserRuntime(value), sortKey: 'runtime_seconds' },
     { title: 'CPU', keys: managedUserFields.cpu, format: 'number', suffix: ' Core', width: 100 },
     { title: 'RAM', keys: managedUserFields.memory, format: 'bytes', width: 110 },
-    { title: '최근 활동', keys: managedUserFields.lastActivity, format: 'date', width: 180 },
+    { title: '최근 활동', keys: managedUserFields.lastActivity, format: 'date', width: 180, sortKey: 'last_activity_at' },
   ]
 }
 
@@ -95,16 +95,16 @@ const serverActions: RowAction[] = [
   { key: 'restart', label: '서버 재시작', icon: <ReloadOutlined />, path: (row) => `/servers/${id(row)}/restart`, permission: 'servers:operate', confirm: '현재 커널 연결이 끊어집니다. 서버를 재시작하시겠습니까?', visible: (row) => /running|active/i.test(asText(pick(row, 'status'))) },
 ]
 const serverColumns: ResourceColumn[] = [
-  { title: '사용자', keys: ['username', 'user_name'], width: 150 },
+  { title: '사용자', keys: ['username', 'user_name'], width: 150, sortKey: 'username' },
   { title: 'Hub', keys: ['hub_name', 'hub'], width: 150 },
   { title: '상태', keys: ['status'], format: 'status', width: 110 },
   { title: '프로필', keys: ['profile_name', 'profile'], width: 140 },
-  { title: '이미지', keys: ['image', 'image_name'], width: 220 },
+  { title: '이미지', keys: ['image', 'image_name'], width: 220, sortKey: 'image' },
   { title: 'Node / Pod', keys: ['node_name', 'pod_name'], width: 180, render: (_value, row) => <>{asText(pick(row, 'node_name'))}<br /><small>{asText(pick(row, 'pod_name'))}</small></> },
   { title: '실행시간', keys: ['runtime', 'running_time'], width: 110 },
-  { title: 'CPU', keys: ['cpu_cores', 'cpu'], format: 'number', suffix: ' Core', width: 100 },
-  { title: 'RAM', keys: ['memory_bytes', 'memory'], format: 'bytes', width: 110 },
-  { title: '시작 시각', keys: ['started_at'], format: 'date', width: 180 },
+  { title: 'CPU', keys: ['cpu_cores', 'cpu'], format: 'number', suffix: ' Core', width: 100, sortKey: 'cpu_cores' },
+  { title: 'RAM', keys: ['memory_bytes', 'memory'], format: 'bytes', width: 110, sortKey: 'memory_bytes' },
+  { title: '시작 시각', keys: ['started_at'], format: 'date', width: 180, sortKey: 'started_at' },
 ]
 
 export function ServersPage() {
@@ -137,7 +137,7 @@ const projectFields: ResourceField[] = [
   { name: 'gpu_quota', label: 'GPU Quota', type: 'number', min: 0 }, { name: 'budget', label: '월 예산', type: 'number', min: 0 },
 ]
 const projectColumns: ResourceColumn[] = [
-  { title: '프로젝트', keys: ['name'], width: 180 }, { title: '책임자', keys: ['owner_name', 'owner'], width: 130 },
+  { title: '프로젝트', keys: ['name'], width: 180, sortKey: 'name' }, { title: '책임자', keys: ['owner_name', 'owner'], width: 130 },
   { title: '구성원', keys: ['member_count', 'members'], format: 'number', suffix: '명', width: 100 }, { title: 'Hub', keys: ['hubs', 'hub_names'], format: 'tags', width: 180 },
   { title: 'CPU Quota', keys: ['cpu_quota'], width: 110 }, { title: 'RAM Quota', keys: ['memory_quota_gb'], format: 'number', suffix: 'GB', width: 110 },
   { title: 'GPU Quota', keys: ['gpu_quota'], width: 110 }, { title: '상태', keys: ['status'], format: 'status', width: 100 },
@@ -155,9 +155,9 @@ const policyFields: ResourceField[] = [
   { name: 'rules', label: '추가 규칙(JSON)', type: 'textarea' }, { name: 'enabled', label: '정책 사용', type: 'switch', initialValue: true },
 ]
 const policyColumns: ResourceColumn[] = [
-  { title: '정책', keys: ['name'], width: 180 }, { title: '대상 유형', keys: ['target_type'], width: 110 }, { title: '대상', keys: ['target_name', 'target'], width: 160 },
+  { title: '정책', keys: ['name'], width: 180, sortKey: 'name' }, { title: '대상 유형', keys: ['target_type'], width: 110 }, { title: '대상', keys: ['target_name', 'target'], width: 160 },
   { title: 'Idle 제한', keys: ['idle_timeout_minutes'], format: 'number', suffix: '분', width: 110 }, { title: '최대 실행', keys: ['max_runtime_minutes'], format: 'number', suffix: '분', width: 110 },
-  { title: '상태', keys: ['enabled', 'status'], format: 'status', width: 100 }, { title: '수정 시각', keys: ['updated_at'], format: 'date', width: 180 },
+  { title: '상태', keys: ['enabled', 'status'], format: 'status', width: 100 }, { title: '수정 시각', keys: ['updated_at'], format: 'date', width: 180, sortKey: 'updated_at' },
 ]
 const policyNote = <Alert type="info" showIcon message="정책 카탈로그" description="v1.2는 정책 자동 배포·Idle 종료·Quota 집행을 수행하지 않습니다." />
 
@@ -172,7 +172,7 @@ const profileFields: ResourceField[] = [
   { name: 'image_id', label: '이미지 ID' }, { name: 'enabled', label: '프로필 사용', type: 'switch', initialValue: true },
 ]
 const profileColumns: ResourceColumn[] = [
-  { title: '프로필', keys: ['name'], width: 180 }, { title: '설명', keys: ['description'], width: 240 },
+  { title: '프로필', keys: ['name'], width: 180, sortKey: 'name' }, { title: '설명', keys: ['description'], width: 240 },
   { title: 'CPU', keys: ['cpu_limit', 'cpu'], format: 'number', suffix: ' Core', width: 100 }, { title: 'RAM', keys: ['memory_gb', 'memory'], format: 'number', suffix: 'GB', width: 100 },
   { title: 'GPU', keys: ['gpu_count', 'gpu'], format: 'number', width: 90 }, { title: 'Storage', keys: ['storage_gb'], format: 'number', suffix: 'GB', width: 110 },
   { title: '이미지', keys: ['image_name', 'image'], width: 180 }, { title: '상태', keys: ['enabled', 'status'], format: 'status', width: 100 },
@@ -190,10 +190,10 @@ const imageFields: ResourceField[] = [
   { name: 'default', label: '기본 이미지', type: 'switch' },
 ]
 const imageColumns: ResourceColumn[] = [
-  { title: '이름', keys: ['name'], width: 170 }, { title: '이미지', keys: ['image', 'repository'], width: 280 }, { title: '버전', keys: ['version', 'tag'], width: 100 },
+  { title: '이름', keys: ['name'], width: 170, sortKey: 'name' }, { title: '이미지', keys: ['image', 'repository'], width: 280 }, { title: '버전', keys: ['version', 'tag'], width: 100 },
   { title: '단계', keys: ['lifecycle', 'status'], format: 'status', width: 110 }, { title: '취약점', keys: ['critical_vulnerabilities', 'critical_count'], format: 'number', suffix: '건', width: 100 },
   { title: 'SBOM', keys: ['sbom_status'], format: 'status', width: 100 }, { title: '기본', keys: ['default', 'is_default'], format: 'boolean', width: 90 },
-  { title: '수정 시각', keys: ['updated_at'], format: 'date', width: 180 },
+  { title: '수정 시각', keys: ['updated_at'], format: 'date', width: 180, sortKey: 'updated_at' },
 ]
 const imageNote = <Alert type="info" showIcon message="이미지 검증 결과는 외부 도구에서 등록합니다" description="jupiq v1.2 자체는 Registry 배포, SBOM 생성이나 취약점 스캔을 수행하지 않습니다." />
 
@@ -217,9 +217,9 @@ export function IncidentsPage() {
 }
 
 const auditColumns: ResourceColumn[] = [
-  { title: '시각', keys: ['created_at', 'timestamp'], format: 'date', width: 180 }, { title: '행위자', keys: ['actor_name', 'username', 'actor'], width: 140 },
-  { title: '작업', keys: ['action'], width: 170 }, { title: '대상 유형', keys: ['resource_type', 'target_type'], width: 120 }, { title: '대상', keys: ['resource_name', 'target'], width: 190 },
-  { title: 'Hub', keys: ['hub_name'], width: 130 }, { title: 'IP', keys: ['ip_address', 'ip'], width: 130 }, { title: '결과', keys: ['result', 'status'], format: 'status', width: 100 },
+  { title: '시각', keys: ['created_at', 'timestamp'], format: 'date', width: 180, sortKey: 'created_at' }, { title: '행위자', keys: ['actor_name', 'username', 'actor'], width: 140, sortKey: 'actor_username' },
+  { title: '작업', keys: ['action'], width: 170, sortKey: 'action' }, { title: '대상 유형', keys: ['resource_type', 'target_type'], width: 120, sortKey: 'resource_type' }, { title: '대상', keys: ['resource_name', 'target'], width: 190 },
+  { title: 'Hub', keys: ['hub_name'], width: 130 }, { title: 'IP', keys: ['ip_address', 'ip'], width: 130, sortKey: 'ip_address' }, { title: '결과', keys: ['result', 'status'], format: 'status', width: 100, sortKey: 'result' },
 ]
 
 export function AuditPage() {

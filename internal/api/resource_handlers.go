@@ -46,7 +46,7 @@ func (s *Server) resourceList(w http.ResponseWriter, r *http.Request, kind strin
 			ownerID = &parsed
 		}
 	}
-	items, page, err := s.Store.ListResources(r.Context(), kind, queryInt(r, "page", 1), queryInt(r, "page_size", 20), r.URL.Query().Get("status"), r.URL.Query().Get("search"), ownerID)
+	items, page, err := s.Store.ListResources(r.Context(), kind, queryInt(r, "page", 1), queryInt(r, "page_size", 20), r.URL.Query().Get("status"), r.URL.Query().Get("search"), ownerID, listSort(r))
 	if err != nil {
 		handleStoreError(w, r, err)
 		return
