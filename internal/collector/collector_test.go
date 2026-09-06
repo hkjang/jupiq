@@ -4,6 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -81,6 +85,90 @@ func TestRetentionReadableOnlyToleratesMissingSettings(t *testing.T) {
 	}
 	if retentionReadable(errors.New("connection refused")) {
 		t.Fatal("pruning with the default window after a failed read would delete samples the operator kept")
+	}
+}
+
+func TestHubProbesRunUnderAConcurrencyCap(t *testing.T) {
+	c := New(nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	var mu sync.Mutex
+	running, peak, completed := 0, 0, 0
+	release := make(chan struct{})
+	for range hubCollectConcurrency * 3 {
+		c.goHub(context.Background(), func() {
+			mu.Lock()
+			running++
+			if running > peak {
+				peak = running
+			}
+			mu.Unlock()
+			<-release
+			mu.Lock()
+			running--
+			completed++
+			mu.Unlock()
+		})
+	}
+	// Hold every admitted probe open so the cap is observed at its ceiling
+	// rather than at whatever the scheduler happened to overlap.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		mu.Lock()
+		admitted := running
+		mu.Unlock()
+		if admitted >= hubCollectConcurrency {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("only %d probes started, want the full cap of %d", admitted, hubCollectConcurrency)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	close(release)
+	c.waitForHubs()
+	mu.Lock()
+	defer mu.Unlock()
+	if peak > hubCollectConcurrency {
+		t.Fatalf("%d hub probes ran at once, cap is %d", peak, hubCollectConcurrency)
+	}
+	if completed != hubCollectConcurrency*3 {
+		t.Fatalf("completed %d probes, want every queued one to run", completed)
+	}
+}
+
+func TestWaitForHubsBlocksUntilInFlightProbesFinish(t *testing.T) {
+	c := New(nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ctx, cancel := context.WithCancel(context.Background())
+	started := make(chan struct{})
+	var wrote atomic.Bool
+	c.goHub(ctx, func() {
+		close(started)
+		time.Sleep(50 * time.Millisecond)
+		// Stands in for updateHubHealth, which writes on a context detached
+		// from the collector's precisely so cancellation cannot suppress it.
+		wrote.Store(true)
+	})
+	<-started
+	cancel()
+	c.waitForHubs()
+	if !wrote.Load() {
+		t.Fatal("shutdown returned before an in-flight hub probe stored its health")
+	}
+}
+
+func TestQueuedHubProbesAreDroppedAfterCancellation(t *testing.T) {
+	c := New(nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	// Occupy every slot without releasing it, so the next probe can only be
+	// admitted once a running one finishes — which never happens here.
+	for range hubCollectConcurrency {
+		c.hubSlots <- struct{}{}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var queued atomic.Int64
+	c.goHub(ctx, func() { queued.Add(1) })
+	c.waitForHubs()
+	if queued.Load() != 0 {
+		t.Fatal("a probe queued behind the cap started work after shutdown began")
 	}
 }
 
