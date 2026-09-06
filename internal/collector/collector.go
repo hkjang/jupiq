@@ -15,11 +15,22 @@ import (
 const (
 	pruneInterval      = 24 * time.Hour
 	pruneRetryInterval = 30 * time.Minute
+	// hubCollectConcurrency caps how many hub probes run at the same time.
+	// Each probe holds an outbound HTTP connection and database round trips
+	// for up to 25 seconds, so an install with dozens of hubs would otherwise
+	// open dozens of them at once on every 30-second cycle.
+	hubCollectConcurrency = 8
+	// hubShutdownGrace bounds how long Run waits for in-flight hub probes to
+	// land their writes after the context is cancelled, so one wedged hub
+	// cannot hold shutdown open indefinitely.
+	hubShutdownGrace = 10 * time.Second
 )
 
 type Collector struct {
 	Store       *store.Store
 	Logger      *slog.Logger
+	hubSlots    chan struct{}
+	hubs        sync.WaitGroup
 	mu          sync.Mutex
 	last        map[int64]time.Time
 	lastLLMScan time.Time
@@ -28,10 +39,14 @@ type Collector struct {
 }
 
 func New(s *store.Store, logger *slog.Logger) *Collector {
-	return &Collector{Store: s, Logger: logger, last: map[int64]time.Time{}}
+	return &Collector{Store: s, Logger: logger, hubSlots: make(chan struct{}, hubCollectConcurrency), last: map[int64]time.Time{}}
 }
 
 func (c *Collector) Run(ctx context.Context) {
+	// Hub probes outlive the cycle that started them, so wait for them here
+	// rather than inside collect: blocking each cycle would delay the
+	// Kubernetes and Prometheus collectors by up to a full probe timeout.
+	defer c.waitForHubs()
 	c.collect(ctx)
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
@@ -42,6 +57,41 @@ func (c *Collector) Run(ctx context.Context) {
 		case <-ticker.C:
 			c.collect(ctx)
 		}
+	}
+}
+
+// goHub runs one hub probe on its own goroutine, admitting at most
+// hubCollectConcurrency of them at a time and registering it so waitForHubs
+// can block on it. A probe still queued when the context is cancelled is
+// dropped instead of starting work that can no longer be stored.
+func (c *Collector) goHub(ctx context.Context, probe func()) {
+	c.hubs.Add(1)
+	go func() {
+		defer c.hubs.Done()
+		select {
+		case c.hubSlots <- struct{}{}:
+		case <-ctx.Done():
+			return
+		}
+		defer func() { <-c.hubSlots }()
+		probe()
+	}()
+}
+
+// waitForHubs blocks until the running hub probes finish. Their health and
+// snapshot writes deliberately run on a context detached from the collector's,
+// so without this wait a shutdown would close the database pool underneath
+// them and lose the degraded status that explains why collection stopped.
+func (c *Collector) waitForHubs() {
+	done := make(chan struct{})
+	go func() {
+		c.hubs.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(hubShutdownGrace):
+		c.Logger.Warn("hub collector shutdown wait timed out", "grace", hubShutdownGrace)
 	}
 }
 
@@ -64,7 +114,7 @@ func (c *Collector) collectHubs(ctx context.Context) {
 			continue
 		}
 		hub := hub
-		go func() {
+		c.goHub(ctx, func() {
 			requestCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
 			defer cancel()
 			currentHub, token, err := c.Store.GetHubCredential(requestCtx, hub.ID)
@@ -100,7 +150,7 @@ func (c *Collector) collectHubs(ctx context.Context) {
 				return
 			}
 			c.updateHubHealth(ctx, currentHub, true, info.Version, "", map[string]any{"users": len(users), "synced_at": time.Now().UTC()})
-		}()
+		})
 	}
 }
 
