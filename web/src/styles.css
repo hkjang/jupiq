@@ -82,6 +82,14 @@ a { color: inherit; }
    must establish a containing block. antd already sets it on the modal, but
    the drawer body is stated here so the rule does not depend on that. */
 .ant-modal-content, .ant-drawer-body { position: relative; }
+/* A Select popup makes the dialog's scroll box taller. If that box can gain a
+   scrollbar it narrows by the scrollbar width the moment the popup opens, and
+   because the modal is centred it shifts sideways - antd then realigns the
+   popup to the new box, it fits again, the scrollbar goes away, and the dialog
+   oscillates under the pointer. Reserving the gutter makes the width constant
+   whether or not the scrollbar is showing. This cannot be observed in a
+   headless browser, which uses zero-width overlay scrollbars. */
+.ant-modal-wrap, .ant-drawer-body { scrollbar-gutter: stable; }
 .text-link { padding: 0; border: 0; color: #1d4ed8; background: none; cursor: pointer; font-weight: 650; }
 .text-link:hover { text-decoration: underline; }
 
