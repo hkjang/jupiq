@@ -16,7 +16,17 @@ import './styles.css'
 // they belong to. Popups opened from a Modal or Drawer (which are themselves
 // on <body>) find no shell ancestor and keep the default container.
 function popupContainer(trigger?: HTMLElement) {
-  return trigger?.closest<HTMLElement>('.app-content') ?? trigger?.closest<HTMLElement>('.app-layout') ?? document.body
+  return (
+    // A Modal or Drawer is itself portaled onto <body>, so a Select opened
+    // inside one has no shell ancestor and used to fall through to <body> -
+    // the one placement that does not work here. Anchor it to the dialog's own
+    // scrolling box so it stays in the same tree as the field it belongs to.
+    trigger?.closest<HTMLElement>('.ant-modal-content')
+    ?? trigger?.closest<HTMLElement>('.ant-drawer-body')
+    ?? trigger?.closest<HTMLElement>('.app-content')
+    ?? trigger?.closest<HTMLElement>('.app-layout')
+    ?? document.body
+  )
 }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

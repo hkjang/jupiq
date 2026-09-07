@@ -78,6 +78,10 @@ a { color: inherit; }
 .ant-table-wrapper { border-radius: 12px; overflow: hidden; border: 1px solid #e5eaf1; background: #fff; }
 .ant-table-thead th { font-weight: 700 !important; white-space: nowrap; }
 .row-actions { white-space: nowrap; }
+/* Popups opened inside a dialog are positioned against these boxes, so they
+   must establish a containing block. antd already sets it on the modal, but
+   the drawer body is stated here so the rule does not depend on that. */
+.ant-modal-content, .ant-drawer-body { position: relative; }
 .text-link { padding: 0; border: 0; color: #1d4ed8; background: none; cursor: pointer; font-weight: 650; }
 .text-link:hover { text-decoration: underline; }
 
