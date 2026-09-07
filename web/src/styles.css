@@ -90,6 +90,13 @@ a { color: inherit; }
    whether or not the scrollbar is showing. This cannot be observed in a
    headless browser, which uses zero-width overlay scrollbars. */
 .ant-modal-wrap, .ant-drawer-body { scrollbar-gutter: stable; }
+/* Native <select> styled to sit beside antd's inputs. */
+.native-select { width: 100%; height: 40px; padding: 4px 11px; border: 1px solid #d9d9d9; border-radius: 10px; background: #fff; color: #172033; font: inherit; line-height: 1.55; cursor: pointer; transition: border-color .2s, box-shadow .2s; }
+.native-select:hover { border-color: #4096ff; }
+.native-select:focus { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37, 99, 235, .1); outline: none; }
+.native-select:disabled { color: rgba(0, 0, 0, .25); background: rgba(0, 0, 0, .04); cursor: not-allowed; }
+.permission-choices { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px 12px; max-height: 260px; overflow-y: auto; padding: 10px; border: 1px solid #e5eaf1; border-radius: 10px; }
+.permission-choices .ant-checkbox-wrapper { margin-inline-start: 0; }
 .text-link { padding: 0; border: 0; color: #1d4ed8; background: none; cursor: pointer; font-weight: 650; }
 .text-link:hover { text-decoration: underline; }
 

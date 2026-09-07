@@ -52,6 +52,7 @@ import {
   type RoleBindingDraft,
   type RoleBindingsFormValue,
 } from '../utils/roleBindings'
+import { NativeSelect } from '../components/NativeSelect'
 import { stableRowKey } from '../utils/rowKey'
 import { sorterFor } from '../utils/sorting'
 import { resolveOidcSettings } from '../utils/settings'
@@ -348,7 +349,7 @@ function RoleManager({ canWrite, canAssign }: { canWrite: boolean; canAssign: bo
         <Form.Item name="key" label="역할 키" rules={[{ required: true, message: '역할 키를 입력해 주세요.' }]}><Input disabled={Boolean(editing?.system)} placeholder="예: department_admin" /></Form.Item>
         <Form.Item name="name" label="표시 이름" rules={[{ required: true, message: '표시 이름을 입력해 주세요.' }]}><Input /></Form.Item>
         <Form.Item name="description" label="설명"><Input.TextArea rows={3} /></Form.Item>
-        <Form.Item name="permissions" label="세부 권한" rules={[{ required: true, message: '권한을 하나 이상 입력해 주세요.' }]} extra={asText(editing?.key) === 'super_admin' ? '최고 관리자 전체 권한(*)은 서비스 잠금을 방지하기 위해 고정됩니다.' : 'resource:action 형식 또는 namespace:* 와일드카드를 사용합니다.'}><Select virtual={false} disabled={asText(editing?.key) === 'super_admin'} mode="tags" tokenSeparators={[',', ' ']} placeholder="예: hubs:read" /></Form.Item>
+        <Form.Item name="permissions" label="세부 권한" rules={[{ required: true, message: '권한을 하나 이상 입력해 주세요.' }]} extra={asText(editing?.key) === 'super_admin' ? '최고 관리자 전체 권한(*)은 서비스 잠금을 방지하기 위해 고정됩니다.' : 'resource:action 형식 또는 namespace:* 와일드카드를 사용합니다.'}><Select virtual={false} disabled={asText(editing?.key) === 'super_admin'} mode="tags" tokenSeparators={[',', ' ']} placeholder="예: hubs:read" open={false} /></Form.Item>
       </Form>
     </Modal>
     <Modal
@@ -376,12 +377,12 @@ function RoleManager({ canWrite, canAssign }: { canWrite: boolean; canAssign: bo
               <Row gutter={12}>
                 <Col xs={24} md={14}>
                   <Form.Item {...field} name={[field.name, 'role_id']} label="역할" rules={[{ required: true, message: '역할을 선택해 주세요.' }, { validator: validateUniqueRole }]}>
-                    <Select virtual={false} placeholder="역할 선택" options={roleRows.map((role) => ({ value: asNumber(role.id), label: `${asText(role.name)} (${asText(role.key)})` }))} />
+                    <NativeSelect placeholder="역할 선택" options={roleRows.map((role) => ({ value: asNumber(role.id), label: `${asText(role.name)} (${asText(role.key)})` }))} />
                   </Form.Item>
                 </Col>
                 <Col xs={24} md={10}>
                   <Form.Item {...field} name={[field.name, 'scope_mode']} label="적용 범위" rules={[{ required: true, message: '적용 범위를 선택해 주세요.' }, { validator: () => validateRestrictedScope(field.name) }]}>
-                    <Select virtual={false} options={[{ value: 'global', label: '전역' }, { value: 'restricted', label: 'Hub·부서 제한' }]} />
+                    <NativeSelect placeholder="적용 범위 선택" options={[{ value: 'global', label: '전역' }, { value: 'restricted', label: 'Hub·부서 제한' }]} />
                   </Form.Item>
                 </Col>
               </Row>

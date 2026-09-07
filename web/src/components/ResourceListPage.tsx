@@ -10,7 +10,6 @@ import {
   Input,
   InputNumber,
   Modal,
-  Select,
   Space,
   Switch,
   Table,
@@ -28,6 +27,7 @@ import { asNumber, asText, formatBytes, formatDate, formatPercent, pick, statusT
 import { hasPermissionForTargetMode } from '../utils/permissions'
 import { stableRowKey } from '../utils/rowKey'
 import { sortKindForFormat, sorterFor } from '../utils/sorting'
+import { NativeSelect } from './NativeSelect'
 import { AsyncState } from './AsyncState'
 import { PageHeader } from './PageHeader'
 
@@ -359,7 +359,7 @@ export function ResourceListPage({ title, description, endpoint, columns, emptyD
           {field.type === 'textarea' ? <Input.TextArea rows={4} placeholder={field.placeholder} />
             : field.type === 'password' ? <Input.Password autoComplete="new-password" placeholder={editing ? '비워 두면 기존 값을 유지합니다' : field.placeholder} />
               : field.type === 'number' ? <InputNumber min={field.min} max={field.max} style={{ width: '100%' }} placeholder={field.placeholder} />
-                : field.type === 'select' ? <Select virtual={false} options={field.options} placeholder={field.placeholder} />
+                : field.type === 'select' ? <NativeSelect options={field.options} placeholder={field.placeholder} />
                   : field.type === 'switch' ? <Switch checkedChildren="사용" unCheckedChildren="사용 안 함" />
                     : <Input placeholder={field.placeholder} />}
         </Form.Item>
