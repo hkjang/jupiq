@@ -189,6 +189,8 @@ func defaultUserRolePermissions() []string {
 
 func (s *Store) Ping(ctx context.Context) error { return s.Pool.Ping(ctx) }
 
+const maxInt = int(^uint(0) >> 1)
+
 func pageBounds(page, pageSize int) (int, int, int) {
 	if page < 1 {
 		page = 1
@@ -198,6 +200,14 @@ func pageBounds(page, pageSize int) (int, int, int) {
 	}
 	if pageSize > 200 {
 		pageSize = 200
+	}
+	// Page numbers arrive straight from a query string, so (page-1)*pageSize
+	// can overflow int and wrap to a negative OFFSET, which PostgreSQL rejects
+	// with an error the caller only sees as a 500. Clamp to the last page whose
+	// offset still fits; it is past the end of any real table, so the honest
+	// answer for an unreachable page number is an empty page.
+	if maxPage := maxInt / pageSize; page > maxPage {
+		page = maxPage
 	}
 	return page, pageSize, (page - 1) * pageSize
 }
