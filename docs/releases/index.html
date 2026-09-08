@@ -4,35 +4,35 @@
 <a class="skip-link" href="#main">본문으로 건너뛰기</a><header class="site-header"><div class="container nav-wrap"><a class="brand" href="../"><img src="../assets/logo.svg" alt="jupiq"></a><button class="menu-button" type="button" aria-expanded="false" aria-controls="site-menu" data-menu-button>메뉴</button><nav class="site-nav" id="site-menu" data-menu><a href="../features/">기능</a><a href="../architecture/">아키텍처</a><a href="../security/">보안</a><a href="../install/">설치</a><a href="../user-guide/">사용자 가이드</a><a href="../admin-guide/">관리자 가이드</a><a class="nav-cta" href="https://github.com/hkjang/jupiq">GitHub</a></nav></div></header>
 <main id="main"><section class="doc-hero"><div class="container"><div class="breadcrumb"><span><a href="../">홈</a></span><span>릴리스</span></div><p class="eyebrow">Release lifecycle</p><h1>태그, 이미지, 파일 이름을 하나의 버전으로 묶습니다</h1><p class="lede">릴리스 자산은 오프라인망 반입에 필요한 서비스 Docker 이미지 tar.gz 하나뿐입니다.</p></div></section>
 <div class="container doc-layout"><aside class="toc"><strong>이 페이지</strong><a href="#contract">버전 계약</a><a href="#pipeline">릴리스 파이프라인</a><a href="#verify">검증</a><a href="#install">사용</a><a href="#rollback">롤백</a></aside><article class="prose">
-<h2 id="contract">버전과 파일명 계약</h2><table><thead><tr><th>항목</th><th>1.4.8 예시</th></tr></thead><tbody><tr><td>저장소 <code>VERSION</code></td><td><code>1.4.8</code></td></tr><tr><td>Git tag</td><td><code>v1.4.8</code></td></tr><tr><td>Docker image</td><td><code>jupiq:v1.4.8</code></td></tr><tr><td>Release asset</td><td><code>jupiq-v1.4.8.tar.gz</code></td></tr><tr><td>로그인 화면</td><td><code>1.4.8</code> + commit 요약</td></tr><tr><td>프로필 메뉴</td><td><code>1.4.8</code></td></tr><tr><td>Version API</td><td>version + commit + build time</td></tr></tbody></table>
+<h2 id="contract">버전과 파일명 계약</h2><table><thead><tr><th>항목</th><th>1.4.9 예시</th></tr></thead><tbody><tr><td>저장소 <code>VERSION</code></td><td><code>1.4.9</code></td></tr><tr><td>Git tag</td><td><code>v1.4.9</code></td></tr><tr><td>Docker image</td><td><code>jupiq:v1.4.9</code></td></tr><tr><td>Release asset</td><td><code>jupiq-v1.4.9.tar.gz</code></td></tr><tr><td>로그인 화면</td><td><code>1.4.9</code> + commit 요약</td></tr><tr><td>프로필 메뉴</td><td><code>1.4.9</code></td></tr><tr><td>Version API</td><td>version + commit + build time</td></tr></tbody></table>
 <p>Semantic Versioning을 따릅니다. 호환되지 않는 변경은 major, 호환 기능은 minor, 호환 수정은 patch를 올립니다. <code>latest</code> 태그는 오프라인 배포 기준으로 사용하지 않습니다.</p>
 
 <h2 id="pipeline">태그 릴리스 파이프라인</h2><ol class="step-list"><li><strong>CI 통과</strong><br>Go vet/test, PostgreSQL 통합 테스트, React type/test/build, 멀티스테이지 Docker build가 성공해야 합니다.</li><li><strong>VERSION 변경과 태그</strong><br>문서와 VERSION을 같은 버전으로 갱신하고 <code>vX.Y.Z</code> annotated tag를 생성합니다.</li><li><strong>태그·버전 검증</strong><br>Workflow가 <code>GITHUB_REF_NAME == v$(cat VERSION)</code>인지 확인하고 README·Compose·OpenAPI·Pages의 버전 계약을 검사합니다.</li><li><strong>멀티스테이지 이미지 빌드</strong><br>React <code>web/dist</code>, Go 실행파일과 version/commit/build time을 최종 이미지에 넣습니다.</li><li><strong>단일 archive 생성</strong><br><code>docker save jupiq:vX.Y.Z | gzip</code>으로 정확한 파일명을 만듭니다.</li><li><strong>삭제 후 복원 검증</strong><br>runner의 원본 이미지를 지우고 tar.gz에서 다시 load해 태그와 OCI label을 확인합니다.</li><li><strong>망 차단 Smoke Test</strong><br><code>--internal</code> Docker network에서 health/readiness, 버전, SPA, OpenAPI, Bootstrap 로그인, 대시보드와 MCP initialize를 확인합니다.</li><li><strong>SHA-256 공개</strong><br>최종 tar.gz의 SHA-256을 계산해 Release 본문과 workflow summary에 기록합니다.</li><li><strong>GitHub Release</strong><br>tar.gz 하나만 업로드하고 검증 명령과 자동 릴리스 노트를 제공합니다.</li></ol>
 
 <h2 id="verify">로컬 빌드와 검증</h2><div class="code-block"><code>make lint
 make test
-make image       # jupiq:v1.4.8
-make package     # dist/jupiq-v1.4.8.tar.gz
+make image       # jupiq:v1.4.9
+make package     # dist/jupiq-v1.4.9.tar.gz
 make verify</code></div>
 <p>릴리스 Workflow는 추가로 <code>postgres:16-alpine</code>을 미리 준비하고 외부 통신이 막힌 내부 Docker network에서 <code>scripts/offline-smoke-test.sh</code>를 실행합니다. PostgreSQL 이미지는 release asset에 포함되지 않습니다.</p>
-<div class="callout"><p><strong>단일 자산 검사:</strong> <code>dist/</code>에 <code>jupiq-v${GITHUB_REF_NAME#v}.tar.gz</code>가 아니라 <code>jupiq-${GITHUB_REF_NAME}.tar.gz</code>, 즉 <code>jupiq-v1.4.8.tar.gz</code> 하나만 있는지 Workflow가 검사합니다.</p></div>
+<div class="callout"><p><strong>단일 자산 검사:</strong> <code>dist/</code>에 <code>jupiq-v${GITHUB_REF_NAME#v}.tar.gz</code>가 아니라 <code>jupiq-${GITHUB_REF_NAME}.tar.gz</code>, 즉 <code>jupiq-v1.4.9.tar.gz</code> 하나만 있는지 Workflow가 검사합니다.</p></div>
 
 <h2 id="install">오프라인망에서 사용</h2><div class="code-block"><code>JUPIQ_ARCHIVE_SHA256='릴리스-본문의-SHA256'
-printf '%s  %s\n' "${JUPIQ_ARCHIVE_SHA256}" jupiq-v1.4.8.tar.gz | sha256sum -c -
-gzip -t jupiq-v1.4.8.tar.gz
-gzip -dc jupiq-v1.4.8.tar.gz | docker load
-docker image inspect jupiq:v1.4.8
+printf '%s  %s\n' "${JUPIQ_ARCHIVE_SHA256}" jupiq-v1.4.9.tar.gz | sha256sum -c -
+gzip -t jupiq-v1.4.9.tar.gz
+gzip -dc jupiq-v1.4.9.tar.gz | docker load
+docker image inspect jupiq:v1.4.9
 # 설치 가이드의 네 줄로 .env를 직접 만든 뒤 실행
 docker run -d --name jupiq --restart unless-stopped --init \
   --env-file .env -p 127.0.0.1:8080:8080 \
   --read-only --tmpfs /tmp:size=64m,mode=1777 \
   --cap-drop ALL --security-opt no-new-privileges:true \
-  jupiq:v1.4.8</code></div>
-<p>GitHub Release 자산에는 서비스 이미지 tar.gz 하나만 있고 <code>.env</code>, <code>.env.example</code>, <code>compose.example.yaml</code>은 포함되지 않습니다. Compose를 사용하려면 같은 <code>v1.4.8</code> 태그 소스의 <a href="https://github.com/hkjang/jupiq/blob/v1.4.8/.env.example"><code>.env.example</code></a>과 <a href="https://github.com/hkjang/jupiq/blob/v1.4.8/compose.example.yaml"><code>compose.example.yaml</code></a>을 별도로 반입하고 <code>docker compose --env-file .env -f compose.example.yaml up -d</code>를 실행하세요.</p>
+  jupiq:v1.4.9</code></div>
+<p>GitHub Release 자산에는 서비스 이미지 tar.gz 하나만 있고 <code>.env</code>, <code>.env.example</code>, <code>compose.example.yaml</code>은 포함되지 않습니다. Compose를 사용하려면 같은 <code>v1.4.9</code> 태그 소스의 <a href="https://github.com/hkjang/jupiq/blob/v1.4.9/.env.example"><code>.env.example</code></a>과 <a href="https://github.com/hkjang/jupiq/blob/v1.4.9/compose.example.yaml"><code>compose.example.yaml</code></a>을 별도로 반입하고 <code>docker compose --env-file .env -f compose.example.yaml up -d</code>를 실행하세요.</p>
 <p>이미지를 private offline registry에 다시 push할 수 있지만 원본 태그를 보존하고 조직 승인 metadata와 연결하세요. 네 환경변수 작성과 보안 옵션은 <a href="../install/">설치 가이드</a>를 참고합니다.</p>
 
 <h2 id="rollback">롤백 원칙</h2><ul class="checklist"><li>현재와 직전 승인 이미지를 동시에 보존</li><li>업그레이드 전 PostgreSQL 복구 지점 생성</li><li>릴리스 노트에서 migration 역호환 여부 확인</li><li>오류 시 먼저 새 컨테이너 로그와 correlation ID 보존</li><li>DB 호환 시 이전 image tag로 복귀</li><li>비호환 migration이면 이전 DB 복원 후 이전 image 기동</li></ul>
 <div class="callout warning"><p>이미지만 내린 뒤 새 schema의 DB를 그대로 쓰는 것은 안전한 롤백이 아닐 수 있습니다. 반드시 릴리스별 migration 안내와 복구 시험을 기준으로 판단하세요.</p></div>
 <p>공개 릴리스 목록은 <a href="https://github.com/hkjang/jupiq/releases">GitHub Releases</a>에서 확인할 수 있습니다.</p>
 </article></div></main>
-<footer class="site-footer"><div class="container"><div class="footer-grid"><div><img class="footer-logo" src="../assets/logo-inverse.svg" alt="jupiq"><p class="small">오프라인망 AI Workspace Control Plane</p></div><div><h3>제품</h3><a href="../features/">기능</a><a href="../architecture/">아키텍처</a></div><div><h3>가이드</h3><a href="../install/">설치</a><a href="../offline/">오프라인 운영</a></div><div><h3>개발자</h3><a href="../api-mcp/">API·MCP</a><a href="./">릴리스</a></div></div><div class="footer-bottom"><span>© <span data-year>2026</span> jupiq contributors</span><span>Version 1.4.8</span></div></div></footer></body></html>
+<footer class="site-footer"><div class="container"><div class="footer-grid"><div><img class="footer-logo" src="../assets/logo-inverse.svg" alt="jupiq"><p class="small">오프라인망 AI Workspace Control Plane</p></div><div><h3>제품</h3><a href="../features/">기능</a><a href="../architecture/">아키텍처</a></div><div><h3>가이드</h3><a href="../install/">설치</a><a href="../offline/">오프라인 운영</a></div><div><h3>개발자</h3><a href="../api-mcp/">API·MCP</a><a href="./">릴리스</a></div></div><div class="footer-bottom"><span>© <span data-year>2026</span> jupiq contributors</span><span>Version 1.4.9</span></div></div></footer></body></html>
