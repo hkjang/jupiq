@@ -67,7 +67,7 @@ jupiq 프로세스가 읽는 설정 환경변수는 정확히 네 개입니다.
 |---|---|
 | `POSTGRES_DSN` | PostgreSQL 연결 문자열. 운영은 `sslmode=verify-full` 권장 |
 | `BOOTSTRAP_ADMIN` | 최초/긴급 로컬 관리자 ID |
-| `BOOTSTRAP_ADMIN_PASSWORD` | Bootstrap 관리자 초기 비밀번호. 첫 로그인 후 변경 |
+| `BOOTSTRAP_ADMIN_PASSWORD` | Bootstrap 관리자 초기 비밀번호. 최소 12자, 첫 로그인 후 변경 |
 | `ENCRYPTION_KEY` | AES-256용 정확히 32바이트(raw 32자, 64자 hex 또는 base64) |
 
 ```bash
