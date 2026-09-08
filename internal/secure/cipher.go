@@ -75,7 +75,14 @@ func (c *Cipher) Derive(label string) []byte {
 	return h.Sum(nil)
 }
 
+// RandomToken returns bytes of cryptographic randomness as an unpadded
+// URL-safe base64 string. A non-positive size is rejected rather than encoded
+// as the empty string, so a caller that ever computes the size cannot hand an
+// empty session state, nonce or API key to code that expects a secret.
 func RandomToken(bytes int) (string, error) {
+	if bytes <= 0 {
+		return "", errors.New("token size must be positive")
+	}
 	b := make([]byte, bytes)
 	if _, err := io.ReadFull(rand.Reader, b); err != nil {
 		return "", err
