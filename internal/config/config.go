@@ -18,12 +18,17 @@ type Config struct {
 	EncryptionKey     []byte
 }
 
+// Load reads the four runtime environment variables. Every problem it finds is
+// reported in one error so an operator fixes the whole set in a single restart
+// instead of meeting the next one on the following boot. The bootstrap password
+// is deliberately not trimmed: leading or trailing spaces belong to the secret.
 func Load() (Config, error) {
 	c := Config{
 		PostgresDSN:       strings.TrimSpace(os.Getenv("POSTGRES_DSN")),
 		BootstrapAdmin:    strings.TrimSpace(os.Getenv("BOOTSTRAP_ADMIN")),
 		BootstrapPassword: os.Getenv("BOOTSTRAP_ADMIN_PASSWORD"),
 	}
+	keyText := strings.TrimSpace(os.Getenv("ENCRYPTION_KEY"))
 	var missing []string
 	if c.PostgresDSN == "" {
 		missing = append(missing, "POSTGRES_DSN")
@@ -34,20 +39,28 @@ func Load() (Config, error) {
 	if c.BootstrapPassword == "" {
 		missing = append(missing, "BOOTSTRAP_ADMIN_PASSWORD")
 	}
-	keyText := strings.TrimSpace(os.Getenv("ENCRYPTION_KEY"))
 	if keyText == "" {
 		missing = append(missing, "ENCRYPTION_KEY")
 	}
+	var problems []string
 	if len(missing) > 0 {
-		return Config{}, fmt.Errorf("required environment variables are missing: %s", strings.Join(missing, ", "))
+		problems = append(problems, fmt.Sprintf("required environment variables are missing: %s", strings.Join(missing, ", ")))
 	}
-	key, err := ParseEncryptionKey(keyText)
-	if err != nil {
-		return Config{}, err
+	// A value that is present but unusable is worth reporting alongside the
+	// missing ones; an absent value has already been named above.
+	if keyText != "" {
+		key, err := ParseEncryptionKey(keyText)
+		if err != nil {
+			problems = append(problems, err.Error())
+		} else {
+			c.EncryptionKey = key
+		}
 	}
-	c.EncryptionKey = key
-	if len(c.BootstrapPassword) < 12 {
-		return Config{}, errors.New("BOOTSTRAP_ADMIN_PASSWORD must contain at least 12 characters")
+	if c.BootstrapPassword != "" && len(c.BootstrapPassword) < 12 {
+		problems = append(problems, "BOOTSTRAP_ADMIN_PASSWORD must contain at least 12 characters")
+	}
+	if len(problems) > 0 {
+		return Config{}, errors.New(strings.Join(problems, "; "))
 	}
 	return c, nil
 }
