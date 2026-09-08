@@ -9,7 +9,6 @@ import (
 	"net"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/hkjang/jupiq/internal/auth"
 	"github.com/hkjang/jupiq/internal/store"
@@ -108,21 +107,6 @@ func requestAudit(r *http.Request, action, resourceType, resourceID, result, rea
 		actorID = &p.User.ID
 	}
 	return store.AuditEvent{ActorUserID: actorID, ActorUsername: p.User.Username, Action: action, ResourceType: resourceType, ResourceID: resourceID, Before: before, After: after, IPAddress: clientIP(r), UserAgent: r.UserAgent(), Result: result, Reason: reason, RequestID: requestID(r)}
-}
-
-func parseTimeQuery(r *http.Request, name string, fallback time.Time) time.Time {
-	value := r.URL.Query().Get(name)
-	if value == "" {
-		return fallback
-	}
-	t, err := time.Parse(time.RFC3339, value)
-	if err != nil {
-		if day, dayErr := time.Parse("2006-01-02", value); dayErr == nil {
-			return day
-		}
-		return fallback
-	}
-	return t
 }
 
 func withPrincipal(r *http.Request, p auth.Principal) *http.Request {
