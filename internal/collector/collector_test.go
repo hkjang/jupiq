@@ -183,3 +183,34 @@ func TestHealthWriteContextSurvivesProviderCancellation(t *testing.T) {
 	default:
 	}
 }
+
+func TestPrometheusQueriesResolveGPUSetFromOneFeatureSnapshot(t *testing.T) {
+	defaults := prometheusQueries(nil, false)
+	if len(defaults) != 2 || defaults["cpu_cores"] == "" || defaults["memory_bytes"] == "" {
+		t.Fatalf("unconfigured cycle lost its base metrics: %#v", defaults)
+	}
+	configured := map[string]string{
+		"cpu_cores":               `up`,
+		"gpu_utilization":         `avg(DCGM_FI_DEV_GPU_UTIL) by (pod)`,
+		"accelerator_utilization": `sum(DCGM_FI_DEV_FB_USED) by (pod)`,
+		"board_temperature":       `avg(nvidia_smi_temperature) by (pod)`,
+	}
+	off := prometheusQueries(configured, false)
+	if len(off) != 1 || off["cpu_cores"] != `up` {
+		t.Fatalf("disabled GPU monitoring left GPU metrics in the cycle: %#v", off)
+	}
+	on := prometheusQueries(configured, true)
+	for name, want := range configured {
+		if on[name] != want {
+			t.Fatalf("configured query %q was replaced: %#v", name, on)
+		}
+	}
+	for _, name := range []string{"gpu_count", "vram_bytes"} {
+		if on[name] == "" {
+			t.Fatalf("default GPU query %q was not added: %#v", name, on)
+		}
+	}
+	if len(configured) != 4 {
+		t.Fatalf("caller configuration was mutated: %#v", configured)
+	}
+}

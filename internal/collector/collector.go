@@ -187,39 +187,53 @@ type prometheusConfig struct {
 	Queries   map[string]string `json:"queries"`
 }
 
+// prometheusQueries resolves the metric set one collection cycle runs, given a
+// single gpu_monitoring snapshot. Re-reading the feature per metric would let a
+// mid-cycle toggle collect some GPU metrics and skip others in the same pass;
+// the authoritative gate is the feature check the store makes inside each write
+// transaction, so one snapshot per cycle is enough here.
+func prometheusQueries(configured map[string]string, gpuMonitoring bool) map[string]string {
+	queries := make(map[string]string, len(configured)+3)
+	for name, query := range configured {
+		queries[name] = query
+	}
+	if len(queries) == 0 {
+		queries["cpu_cores"] = `sum(rate(container_cpu_usage_seconds_total{pod=~"jupyter-.*"}[5m])) by (pod)`
+		queries["memory_bytes"] = `sum(container_memory_working_set_bytes{pod=~"jupyter-.*"}) by (pod)`
+	}
+	if !gpuMonitoring {
+		for name, query := range queries {
+			if store.IsGPUMetric(name, query) {
+				delete(queries, name)
+			}
+		}
+		return queries
+	}
+	for name, query := range map[string]string{
+		"gpu_count":       `count(DCGM_FI_DEV_GPU_UTIL{pod=~"jupyter-.*"}) by (pod)`,
+		"gpu_utilization": `avg(DCGM_FI_DEV_GPU_UTIL) by (pod)`,
+		"vram_bytes":      `sum(DCGM_FI_DEV_FB_USED * 1024 * 1024) by (pod)`,
+	} {
+		if _, ok := queries[name]; !ok {
+			queries[name] = query
+		}
+	}
+	return queries
+}
+
 func (c *Collector) collectPrometheus(ctx context.Context) {
 	var cfg prometheusConfig
 	token, _, generation, err := c.Store.GetSettingAndSecretGeneration(ctx, "prometheus", "prometheus.token", &cfg)
 	if err != nil || !cfg.Enabled || cfg.BaseURL == "" {
 		return
 	}
-	if len(cfg.Queries) == 0 {
-		cfg.Queries = map[string]string{
-			"cpu_cores":    `sum(rate(container_cpu_usage_seconds_total{pod=~"jupyter-.*"}[5m])) by (pod)`,
-			"memory_bytes": `sum(container_memory_working_set_bytes{pod=~"jupyter-.*"}) by (pod)`,
-		}
-	}
-	gpuMonitoring := c.featureEnabled(ctx, "gpu_monitoring")
-	if gpuMonitoring {
-		if _, ok := cfg.Queries["gpu_count"]; !ok {
-			cfg.Queries["gpu_count"] = `count(DCGM_FI_DEV_GPU_UTIL{pod=~"jupyter-.*"}) by (pod)`
-		}
-		if _, ok := cfg.Queries["gpu_utilization"]; !ok {
-			cfg.Queries["gpu_utilization"] = `avg(DCGM_FI_DEV_GPU_UTIL) by (pod)`
-		}
-		if _, ok := cfg.Queries["vram_bytes"]; !ok {
-			cfg.Queries["vram_bytes"] = `sum(DCGM_FI_DEV_FB_USED * 1024 * 1024) by (pod)`
-		}
-	}
+	queries := prometheusQueries(cfg.Queries, c.featureEnabled(ctx, "gpu_monitoring"))
 	client, err := integration.NewPrometheus(cfg.BaseURL, token, cfg.VerifyTLS)
 	if err != nil {
 		c.Logger.Warn("prometheus config invalid", "error", err)
 		return
 	}
-	for name, query := range cfg.Queries {
-		if store.IsGPUMetric(name, query) && !c.featureEnabled(ctx, "gpu_monitoring") {
-			continue
-		}
+	for name, query := range queries {
 		requestCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		points, err := client.Query(requestCtx, query, time.Now())
 		cancel()
