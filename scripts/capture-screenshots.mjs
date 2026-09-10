@@ -402,6 +402,10 @@ async function applyCondition(page, entry) {
   if (entry.file === 'admin-settings.webp' || entry.file === 'admin-settings-mobile.webp') {
     await page.getByRole('tab', { name: '외부 연동' }).click().catch(() => {})
   }
+  if (entry.file === 'admin-roles.webp') {
+    await page.getByRole('tab', { name: '보안·키 권한' }).click().catch(() => {})
+    await page.getByText('역할·세부 권한 관리', { exact: true }).waitFor({ timeout: 8_000 }).catch(() => {})
+  }
   if (entry.file === 'profile-menu.webp') {
     await page.getByRole('button', { name: '사용자 메뉴 열기' }).click()
     await page.getByText('서비스 버전', { exact: true }).waitFor()
