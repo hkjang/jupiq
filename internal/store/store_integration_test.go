@@ -302,20 +302,22 @@ func TestUsageAndHubReconciliationIntegration(t *testing.T) {
 	if err := database.SavePrometheusMetricPoints(ctx, aliasedGPU, `avg(DCGM_FI_DEV_GPU_UTIL) by (pod)`, []integration.MetricPoint{{Labels: map[string]string{"pod": podName}, Value: 55, Timestamp: now}}); err != nil {
 		t.Fatal(err)
 	}
-	if hidden, err := database.Metrics(ctx, now.Add(-time.Minute), now.Add(time.Minute), aliasedGPU, 10); err != nil || len(hidden) != 0 {
-		t.Fatalf("aliased GPU metric escaped OFF gate: items=%#v err=%v", hidden, err)
+	// The alias is only recognisable as GPU data through the query it was saved
+	// with, so the stored metric_kind — not the name gate — is what hides it.
+	if hidden, blocked, err := database.Metrics(ctx, now.Add(-time.Minute), now.Add(time.Minute), aliasedGPU, 10); err != nil || len(hidden) != 0 || blocked {
+		t.Fatalf("aliased GPU metric escaped OFF gate: items=%#v blocked=%v err=%v", hidden, blocked, err)
 	}
 	if _, err := database.Pool.Exec(ctx, `UPDATE settings SET value=jsonb_set(value,'{gpu_monitoring}','true') WHERE setting_key='features'`); err != nil {
 		t.Fatal(err)
 	}
-	if absent, err := database.Metrics(ctx, now.Add(-time.Minute), now.Add(time.Minute), aliasedGPU, 10); err != nil || len(absent) != 0 {
-		t.Fatalf("GPU metric collected while OFF became visible after enabling: items=%#v err=%v", absent, err)
+	if absent, blocked, err := database.Metrics(ctx, now.Add(-time.Minute), now.Add(time.Minute), aliasedGPU, 10); err != nil || len(absent) != 0 || blocked {
+		t.Fatalf("GPU metric collected while OFF became visible after enabling: items=%#v blocked=%v err=%v", absent, blocked, err)
 	}
 	if err := database.SavePrometheusMetricPoints(ctx, aliasedGPU, `avg(DCGM_FI_DEV_GPU_UTIL) by (pod)`, []integration.MetricPoint{{Labels: map[string]string{"pod": podName}, Value: 55, Timestamp: now}}); err != nil {
 		t.Fatal(err)
 	}
-	if visible, err := database.Metrics(ctx, now.Add(-time.Minute), now.Add(time.Minute), aliasedGPU, 10); err != nil || len(visible) != 1 {
-		t.Fatalf("classified GPU metric saved while ON was not visible: items=%#v err=%v", visible, err)
+	if visible, blocked, err := database.Metrics(ctx, now.Add(-time.Minute), now.Add(time.Minute), aliasedGPU, 10); err != nil || len(visible) != 1 || blocked {
+		t.Fatalf("classified GPU metric saved while ON was not visible: items=%#v blocked=%v err=%v", visible, blocked, err)
 	}
 	if _, err := database.Pool.Exec(ctx, `UPDATE settings SET value=$1 WHERE setting_key='features'`, featureBeforeGPU); err != nil {
 		t.Fatal(err)

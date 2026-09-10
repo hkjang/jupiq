@@ -34,3 +34,19 @@ func TestRemoteMetricIdentityLabelsAreRemovedUntilInventoryResolution(t *testing
 		t.Fatalf("operational labels or caller input were mutated: labels=%#v original=%#v", labels, original)
 	}
 }
+
+func TestGPUFeatureBlockedFollowsMetricClassification(t *testing.T) {
+	for _, metric := range []string{"gpu_utilization", "model_vram", "DCGM_FI_DEV_FB_USED", "cuda_cores", "nvidia_smi_temperature"} {
+		if !GPUFeatureBlocked(metric, false) {
+			t.Errorf("GPU metric %q was not gated while monitoring is off", metric)
+		}
+		if GPUFeatureBlocked(metric, true) {
+			t.Errorf("GPU metric %q stayed gated while monitoring is on", metric)
+		}
+	}
+	for _, metric := range []string{"", "cpu_cores", "memory_bytes"} {
+		if GPUFeatureBlocked(metric, false) {
+			t.Errorf("non-GPU metric %q was gated by the GPU feature", metric)
+		}
+	}
+}

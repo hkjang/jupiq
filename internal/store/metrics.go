@@ -713,7 +713,14 @@ func valueOrZero(value *time.Time) time.Time {
 	return *value
 }
 
-func (s *Store) Metrics(ctx context.Context, from, to time.Time, metric string, limit int) ([]map[string]any, error) {
+// GPUFeatureBlocked reports whether a metric lookup names a GPU metric that a
+// disabled gpu_monitoring feature has to hide. Metrics returns it so callers can
+// tell "the feature is off" apart from the otherwise identical "no samples".
+func GPUFeatureBlocked(metric string, gpuMonitoring bool) bool {
+	return !gpuMonitoring && IsGPUMetricName(metric)
+}
+
+func (s *Store) Metrics(ctx context.Context, from, to time.Time, metric string, limit int) ([]map[string]any, bool, error) {
 	if limit <= 0 || limit > 5000 {
 		limit = 1000
 	}
@@ -721,12 +728,12 @@ func (s *Store) Metrics(ctx context.Context, from, to time.Time, metric string, 
 		GPUMonitoring bool `json:"gpu_monitoring"`
 	}
 	_ = s.GetSetting(ctx, "features", &features)
-	if !features.GPUMonitoring && IsGPUMetricName(metric) {
-		return []map[string]any{}, nil
+	if GPUFeatureBlocked(metric, features.GPUMonitoring) {
+		return []map[string]any{}, true, nil
 	}
 	rows, err := s.Pool.Query(ctx, `SELECT source,metric_name,labels,value,sampled_at FROM metric_samples WHERE sampled_at BETWEEN $1 AND $2 AND ($3='' OR metric_name=$3) AND ($5 OR metric_kind<>'gpu') ORDER BY sampled_at DESC LIMIT $4`, from, to, metric, limit, features.GPUMonitoring)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer rows.Close()
 	items := []map[string]any{}
@@ -736,11 +743,11 @@ func (s *Store) Metrics(ctx context.Context, from, to time.Time, metric string, 
 		var value float64
 		var sampled time.Time
 		if err := rows.Scan(&source, &name, &labels, &value, &sampled); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		items = append(items, map[string]any{"source": source, "metric": name, "labels": json.RawMessage(labels), "value": value, "sampled_at": sampled})
 	}
-	return items, rows.Err()
+	return items, false, rows.Err()
 }
 
 func (s *Store) PruneMetrics(ctx context.Context, rawRetentionDays, llmRetentionDays int) error {

@@ -1590,18 +1590,15 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	metric := r.URL.Query().Get("metric")
-	lowerMetric := strings.ToLower(metric)
-	if strings.Contains(lowerMetric, "gpu") || strings.Contains(lowerMetric, "vram") || strings.Contains(lowerMetric, "dcgm") {
-		var features map[string]bool
-		_ = s.Store.GetSetting(r.Context(), "features", &features)
-		if !features["gpu_monitoring"] {
-			writeJSON(w, http.StatusOK, map[string]any{"data": []any{}, "feature_enabled": false, "meta": map[string]any{"total": 0}})
-			return
-		}
-	}
-	items, err := s.Store.Metrics(r.Context(), from, to, metric, queryInt(r, "limit", 1000))
+	items, gpuBlocked, err := s.Store.Metrics(r.Context(), from, to, metric, queryInt(r, "limit", 1000))
 	if err != nil {
 		handleStoreError(w, r, err)
+		return
+	}
+	// 어떤 이름이 GPU 지표인지는 store가 단독으로 판정한다. 여기서 목록을 따로
+	// 두면 판정이 갈라져 일부 별칭이 '기능 꺼짐' 대신 '표본 없음'으로 보인다.
+	if gpuBlocked {
+		writeJSON(w, http.StatusOK, map[string]any{"data": []any{}, "feature_enabled": false, "meta": map[string]any{"total": 0}})
 		return
 	}
 	data(w, http.StatusOK, items)
