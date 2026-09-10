@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/hkjang/jupiq/internal/integration"
 	"github.com/jackc/pgx/v5"
@@ -804,9 +805,20 @@ func (s *Store) GetServerActionCredential(ctx context.Context, id int64) (Server
 	return server, hub, string(plain), nil
 }
 
+// truncate caps a stored operational message at max bytes. The cut must land on
+// a rune boundary: hub and integration errors are Korean, so slicing mid-rune
+// would hand PostgreSQL an invalid UTF-8 byte sequence and fail the very UPDATE
+// that records the failure, leaving a broken Hub reported as healthy.
 func truncate(value string, max int) string {
-	if len(value) > max {
-		return value[:max]
+	if !utf8.ValidString(value) {
+		value = strings.ToValidUTF8(value, "�")
 	}
-	return value
+	if len(value) <= max {
+		return value
+	}
+	cut := max
+	for cut > 0 && !utf8.RuneStart(value[cut]) {
+		cut--
+	}
+	return value[:cut]
 }
