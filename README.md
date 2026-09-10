@@ -35,23 +35,23 @@
 릴리스의 서비스 이미지는 다음 규칙을 따릅니다.
 
 ```text
-Docker image   jupiq:v1.4.10
-Release asset  jupiq-v1.4.10.tar.gz
+Docker image   jupiq:v1.4.11
+Release asset  jupiq-v1.4.11.tar.gz
 ```
 
 ```bash
 # GitHub Release 본문의 64자리 SHA-256을 승인 기록과 대조
 JUPIQ_ARCHIVE_SHA256='릴리스-본문의-SHA256'
-printf '%s  %s\n' "${JUPIQ_ARCHIVE_SHA256}" jupiq-v1.4.10.tar.gz | sha256sum -c -
-gzip -t jupiq-v1.4.10.tar.gz
-gzip -dc jupiq-v1.4.10.tar.gz | docker load
+printf '%s  %s\n' "${JUPIQ_ARCHIVE_SHA256}" jupiq-v1.4.11.tar.gz | sha256sum -c -
+gzip -t jupiq-v1.4.11.tar.gz
+gzip -dc jupiq-v1.4.11.tar.gz | docker load
 # 소스 체크아웃에서는 .env.example을 복사하고 네 값을 안전하게 변경
 cp .env.example .env
 docker run -d --name jupiq --restart unless-stopped --init \
   --env-file .env -p 127.0.0.1:8080:8080 \
   --read-only --tmpfs /tmp:size=64m,mode=1777 \
   --cap-drop ALL --security-opt no-new-privileges:true \
-  jupiq:v1.4.10
+  jupiq:v1.4.11
 curl --fail http://127.0.0.1:8080/readyz
 ```
 
