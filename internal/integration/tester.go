@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 type TestRequest struct {
@@ -337,13 +338,23 @@ func extractVersion(payload map[string]any) string {
 	return ""
 }
 
+// safeConnectionError shortens a preflight failure for the administrator drawer.
+// The 500 byte cap has to stop on a rune boundary: these messages are Korean, so
+// a mid-rune cut would leave invalid UTF-8 that the JSON encoder turns into a
+// replacement character at the end of every long error.
 func safeConnectionError(err error) string {
-	message := err.Error()
-	message = strings.ReplaceAll(message, "Bearer", "인증")
-	if len(message) > 500 {
-		message = message[:500]
+	message := strings.ReplaceAll(err.Error(), "Bearer", "인증")
+	if !utf8.ValidString(message) {
+		message = strings.ToValidUTF8(message, "�")
 	}
-	return message
+	if len(message) <= 500 {
+		return message
+	}
+	cut := 500
+	for cut > 0 && !utf8.RuneStart(message[cut]) {
+		cut--
+	}
+	return message[:cut]
 }
 
 func remediation(status int, err error) string {
