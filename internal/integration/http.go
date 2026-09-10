@@ -203,12 +203,22 @@ func doJSONWithAuthScheme(ctx context.Context, client *http.Client, method, endp
 	return 0, nil, lastErr
 }
 
+// joinURL appends an already percent-encoded path to an administrator-configured
+// base URL. Callers escape each segment themselves (url.PathEscape), so the
+// escaped text goes to RawPath and its decoded form to Path: assigning the
+// escaped text to Path alone would make URL.String() escape the '%' again and
+// send '홍길동' or 'john doe' as '%25ED...' or 'john%2520doe'.
 func joinURL(base string, path string) (string, error) {
 	u, err := ValidateEndpoint(base)
 	if err != nil {
 		return "", err
 	}
-	u.Path = strings.TrimRight(u.Path, "/") + "/" + strings.TrimLeft(path, "/")
+	escaped := strings.TrimRight(u.EscapedPath(), "/") + "/" + strings.TrimLeft(path, "/")
+	decoded, err := url.PathUnescape(escaped)
+	if err != nil {
+		return "", fmt.Errorf("요청 경로의 percent 인코딩이 올바르지 않습니다: %w", err)
+	}
+	u.Path, u.RawPath = decoded, escaped
 	u.RawQuery = ""
 	return u.String(), nil
 }

@@ -75,12 +75,16 @@ func (c *JupyterHubClient) Users(ctx context.Context) ([]JupyterUser, error) {
 	return users, nil
 }
 
-func (c *JupyterHubClient) ServerAction(ctx context.Context, username, serverName, action string) error {
+func (c *JupyterHubClient) serverEndpoint(username, serverName string) (string, error) {
 	path := "users/" + url.PathEscape(username) + "/server"
 	if serverName != "" {
 		path = "users/" + url.PathEscape(username) + "/servers/" + url.PathEscape(serverName)
 	}
-	endpoint, err := c.endpoint(path)
+	return c.endpoint(path)
+}
+
+func (c *JupyterHubClient) ServerAction(ctx context.Context, username, serverName, action string) error {
+	endpoint, err := c.serverEndpoint(username, serverName)
 	if err != nil {
 		return err
 	}
