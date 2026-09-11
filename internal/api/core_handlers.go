@@ -24,6 +24,7 @@ func (s *Server) registerCore(mux router) {
 	mux.HandleFunc("GET /api/v1/live", s.require("dashboard:read", s.live))
 	mux.HandleFunc("GET /api/v1/dashboard/live", s.require("dashboard:read", s.live))
 	mux.HandleFunc("GET /api/v1/usage", s.require("usage:read", s.usage))
+	mux.HandleFunc("GET /api/v1/usage/consumption", s.require("usage:read", s.usageConsumption))
 	mux.HandleFunc("GET /api/v1/llm-usage", s.require("usage:read", s.llmUsage))
 	mux.HandleFunc("GET /api/v1/llm-usage/live", s.require("usage:read", s.llmUsageLive))
 	mux.HandleFunc("GET /api/v1/settings", s.require("settings:read", s.settingsGet))
@@ -396,7 +397,41 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
 		handleStoreError(w, r, err)
 		return
 	}
+	// Consumption totals travel with the rate trend so a caller reading the
+	// usage response can tell how much was used, not only how hard pods worked.
+	groupBy := r.URL.Query().Get("group_by")
+	if consumption, err := s.Store.ResourceConsumption(r.Context(), from, to, groupBy, 100); err == nil {
+		result["consumption"] = consumption
+	} else {
+		s.Logger.Warn("resource consumption unavailable", "error", err)
+	}
 	data(w, http.StatusOK, result)
+}
+
+// usageConsumption reports integrated CPU and memory consumption per user, hub,
+// network or department. These are core-hours and GB-hours rather than the
+// averages in /usage: an average cannot separate one core held for a day from
+// one core held for five minutes, which is the question this endpoint answers.
+func (s *Server) usageConsumption(w http.ResponseWriter, r *http.Request) {
+	now := time.Now().UTC()
+	from, to, err := boundedTimeRange(r, now.Add(-30*24*time.Hour), now, 366*24*time.Hour)
+	if err != nil {
+		apiError(w, r, http.StatusBadRequest, "invalid_range", err.Error())
+		return
+	}
+	items, err := s.Store.ResourceConsumption(r.Context(), from, to, r.URL.Query().Get("group_by"), queryInt(r, "limit", 100))
+	if err != nil {
+		handleStoreError(w, r, err)
+		return
+	}
+	through, throughErr := s.Store.RolledUpThrough(r.Context())
+	payload := map[string]any{"from": from, "to": to, "data": items}
+	if throughErr == nil {
+		// Consumption is only complete up to the last hour the rollup consumed;
+		// the in-progress hour is deliberately excluded from the buckets.
+		payload["rolled_up_through"] = through
+	}
+	data(w, http.StatusOK, payload)
 }
 
 func (s *Server) llmUsage(w http.ResponseWriter, r *http.Request) {
@@ -636,7 +671,7 @@ var allowedSettingKeys = map[string]bool{
 }
 
 var allowedSettingFields = map[string]map[string]bool{
-	"system":        {"raw_retention_days": true},
+	"system":        {"raw_retention_days": true, "usage_retention_days": true},
 	"workflow":      {"approval_enabled": true, "manager_review_enabled": true, "require_reason": true, "request_types": true},
 	"auth.oidc":     {"enabled": true, "issuer_url": true, "client_id": true, "redirect_url": true, "scopes": true, "username_claim": true, "auto_create_users": true, "verify_tls": true},
 	"ai":            {"enabled": true, "provider": true, "base_url": true, "model": true, "max_tokens": true, "streaming": true, "verify_tls": true},
@@ -716,6 +751,9 @@ func validateSettingSection(key string, object map[string]any) error {
 		min, max       float64
 	}{
 		{"system", "raw_retention_days", 1, 365},
+		// Consumption buckets are small and are the only record left once raw
+		// samples age out, so they are allowed a multi-year window.
+		{"system", "usage_retention_days", 1, 3650},
 		{"ai", "max_tokens", 1, integration.MaxAITokens},
 		{"llm_usage", "stale_seconds", 30, 86400}, {"llm_usage", "retention_days", 1, 365},
 		{"llm_usage", "input_cost_per_million", 0, 1e12}, {"llm_usage", "output_cost_per_million", 0, 1e12},

@@ -35,7 +35,7 @@ import { ChartCard } from '../components/ChartCard'
 import { PageHeader } from '../components/PageHeader'
 import { useApi } from '../hooks/useApi'
 import type { ApiRecord } from '../types'
-import { asNumber, asText, formatBytes, formatDate, formatDuration, normalizePercentValue, pick, statusTone } from '../utils/format'
+import { asNumber, asText, formatBytes, formatCoreHours, formatDate, formatDuration, formatGbHours, formatObservedRatio, normalizePercentValue, pick, statusTone } from '../utils/format'
 import { stableRowKey } from '../utils/rowKey'
 import { sorterFor } from '../utils/sorting'
 import { normalizeUserDetail, periodSummary, records, type UsagePeriod } from '../utils/userDetail'
@@ -150,22 +150,28 @@ function UsageTab({ usage, gpuEnabled }: { usage: Record<UsagePeriod, ApiRecord>
   const period: UsagePeriod = requested && requested in periodLabels ? requested : 'day'
   const selected = periodSummary(usage[period])
   const runtime = pick(selected, 'runtime_seconds', 'server_running_seconds')
-  const memory = pick(selected, 'memory_average', 'memory_bytes_average', 'memory_bytes')
   const comparison: ApiRecord[] = (Object.keys(periodLabels) as UsagePeriod[]).map((key) => ({ period: key, ...periodSummary(usage[key]) }))
   const chartOption: EChartsOption = {
     tooltip: { trigger: 'axis' },
     grid: { left: 48, right: 18, top: 24, bottom: 48 },
     xAxis: { type: 'category', data: comparison.map((row) => `${periodLabels[row.period as UsagePeriod]}간`) },
-    yAxis: { type: 'value', name: '시간' },
-    series: [{ name: '서버 실행시간', type: 'bar', data: comparison.map((row) => asNumber(pick(row, 'runtime_seconds', 'server_running_seconds')) / 3600), itemStyle: { color: '#2563eb', borderRadius: [6, 6, 0, 0] } }],
+    yAxis: [{ type: 'value', name: 'Core·h' }, { type: 'value', name: '시간' }],
+    legend: { bottom: 0, data: ['CPU 사용량', '서버 실행시간'] },
+    series: [
+      { name: 'CPU 사용량', type: 'bar', data: comparison.map((row) => asNumber(row.cpu_core_hours)), itemStyle: { color: '#2563eb', borderRadius: [6, 6, 0, 0] } },
+      { name: '서버 실행시간', type: 'bar', yAxisIndex: 1, data: comparison.map((row) => asNumber(pick(row, 'runtime_seconds', 'server_running_seconds')) / 3600), itemStyle: { color: '#94a3b8', borderRadius: [6, 6, 0, 0] } },
+    ],
   }
   const columns: TableColumnsType<ApiRecord> = [
     { title: '기간', dataIndex: 'period', key: 'period', render: (value) => periodLabels[value as UsagePeriod] },
     { title: '로그인', key: 'logins', render: (_value, row) => `${asNumber(pick(row, 'login_count', 'logins')).toLocaleString('ko-KR')}회` },
     { title: '서버 시작', key: 'starts', render: (_value, row) => `${asNumber(pick(row, 'server_start_count', 'server_starts', 'servers')).toLocaleString('ko-KR')}회` },
     { title: '실행시간', key: 'runtime', render: (_value, row) => formatDuration(pick(row, 'runtime_seconds', 'server_running_seconds')) },
+    { title: 'CPU 사용량', key: 'cpu_hours', render: (_value, row) => formatCoreHours(row.cpu_core_hours) },
+    { title: '메모리 사용량', key: 'memory_hours', render: (_value, row) => formatGbHours(row.memory_gb_hours) },
     { title: 'CPU 평균', key: 'cpu', render: (_value, row) => hasValue(row.cpu_average) ? `${asNumber(row.cpu_average).toLocaleString('ko-KR', { maximumFractionDigits: 2 })} Core` : '수집 불가' },
     { title: 'RAM 평균', key: 'memory', render: (_value, row) => hasValue(pick(row, 'memory_average', 'memory_bytes_average')) ? formatBytes(pick(row, 'memory_average', 'memory_bytes_average')) : '수집 불가' },
+    { title: '관측 비율', key: 'observed', render: (_value, row) => formatObservedRatio(row.observed_ratio) },
     ...(gpuEnabled ? [{ title: 'GPU 평균', key: 'gpu', render: (_value: unknown, row: ApiRecord) => hasValue(row.gpu_average) ? `${asNumber(row.gpu_average).toLocaleString('ko-KR', { maximumFractionDigits: 1 })}%` : '수집 불가' }] : []),
   ]
 
@@ -173,12 +179,18 @@ function UsageTab({ usage, gpuEnabled }: { usage: Record<UsagePeriod, ApiRecord>
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
       <Segmented<UsagePeriod> value={period} options={(Object.keys(periodLabels) as UsagePeriod[]).map((value) => ({ value, label: `${periodLabels[value]}간` }))} onChange={(value) => setParams((current) => { const next = new URLSearchParams(current); next.set('period', value); next.set('tab', 'usage'); return next })} />
       <Row gutter={[16, 16]}>
-        <Col xs={12} lg={6}><Card><Statistic title="로그인" value={asNumber(pick(selected, 'login_count', 'logins'))} suffix="회" /></Card></Col>
+        <Col xs={12} lg={6}><Card className="kpi-card"><Statistic title="CPU 사용량" value={formatCoreHours(selected.cpu_core_hours)} /></Card></Col>
+        <Col xs={12} lg={6}><Card className="kpi-card"><Statistic title="메모리 사용량" value={formatGbHours(selected.memory_gb_hours)} /></Card></Col>
         <Col xs={12} lg={6}><Card><Statistic title="서버 실행시간" value={hasValue(runtime) ? formatDuration(runtime) : '수집 불가'} /></Card></Col>
-        <Col xs={12} lg={6}><Card><Statistic title="CPU 평균" value={hasValue(selected.cpu_average) ? asNumber(selected.cpu_average) : '수집 불가'} suffix={hasValue(selected.cpu_average) ? 'Core' : undefined} precision={hasValue(selected.cpu_average) ? 2 : undefined} /></Card></Col>
-        <Col xs={12} lg={6}><Card><Statistic title="RAM 평균" value={hasValue(memory) ? formatBytes(memory) : '수집 불가'} /></Card></Col>
+        <Col xs={12} lg={6}><Card><Statistic title="로그인" value={asNumber(pick(selected, 'login_count', 'logins'))} suffix="회" /></Card></Col>
       </Row>
-      <ChartCard title="기간별 서버 실행시간 비교" subtitle="보존된 메타데이터 기준" option={chartOption} empty={comparison.every((row) => !asNumber(row.runtime_seconds))} />
+      <Alert
+        type="info"
+        showIcon
+        message="사용량은 점유한 자원을 시간으로 적분한 값입니다"
+        description={`1 Core를 한 시간 점유하면 1 Core·h입니다. 평균은 실행 중 얼마나 바빴는지만 말해 주어 1 Core를 하루 쓴 경우와 5분 쓴 경우를 구분하지 못합니다. 이 기간 실행시간 중 ${formatObservedRatio(selected.observed_ratio)}가 실제 수집된 표본으로 뒷받침됩니다.`}
+      />
+      <ChartCard title="기간별 자원 사용량" subtitle="점유 자원 × 시간으로 적분한 소비량" option={chartOption} empty={comparison.every((row) => !asNumber(row.cpu_core_hours) && !asNumber(row.runtime_seconds))} />
       <Card title="일·주·월 비교"><Table<ApiRecord> rowKey={(row) => asText(row.period)} columns={columns} dataSource={comparison} pagination={false} scroll={{ x: 800 }} /></Card>
     </Space>
   )

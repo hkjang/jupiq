@@ -3,6 +3,7 @@ import { Alert, Button, Result, Tag } from 'antd'
 import { Link } from 'react-router-dom'
 import { jsonBody, request } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { ConsumptionPanel } from '../components/ConsumptionPanel'
 import { ResourceListPage, type ResourceColumn, type ResourceField, type RowAction } from '../components/ResourceListPage'
 import type { ApiRecord } from '../types'
 import { asText, pick, statusTone } from '../utils/format'
@@ -241,7 +242,16 @@ const costColumnsWithoutGpu: ResourceColumn[] = [...costBaseColumns, ...costTail
 
 export function CostsPage() {
   const { features } = useAuth()
-  return <ResourceListPage title="비용·용량" description="관리자가 등록한 부서·프로젝트·망별 비용 산정 결과를 조회합니다." dataNote={costNote} endpoint="/costs" emptyDescription="등록된 비용 데이터가 없습니다." columns={features.gpuMonitoring ? costColumnsWithGpu : costColumnsWithoutGpu} />
+  // Measured consumption first, because it is derived from what the pods
+  // actually held; the registered cost catalog below is entered by hand.
+  return (
+    <>
+      <ConsumptionPanel gpuEnabled={features.gpuMonitoring} />
+      <div style={{ marginTop: 16 }}>
+        <ResourceListPage title="비용·용량" description="관리자가 등록한 부서·프로젝트·망별 비용 산정 결과를 조회합니다." dataNote={costNote} endpoint="/costs" emptyDescription="등록된 비용 데이터가 없습니다." columns={features.gpuMonitoring ? costColumnsWithGpu : costColumnsWithoutGpu} />
+      </div>
+    </>
+  )
 }
 
 const notificationFields: ResourceField[] = [

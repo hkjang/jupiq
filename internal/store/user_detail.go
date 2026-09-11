@@ -84,21 +84,29 @@ type UserTimeline struct {
 }
 
 type UserUsagePeriod struct {
-	From             time.Time  `json:"from"`
-	To               time.Time  `json:"to"`
-	SampleCount      int64      `json:"sample_count"`
-	LoginCount       int64      `json:"login_count"`
-	ServerCount      int64      `json:"server_count"`
-	ServerStartCount int64      `json:"server_start_count"`
-	CurrentServers   int64      `json:"current_servers"`
-	RuntimeSeconds   float64    `json:"runtime_seconds"`
-	CPUAverage       float64    `json:"cpu_average"`
-	CPUPeak          float64    `json:"cpu_peak"`
-	MemoryAverage    float64    `json:"memory_average"`
-	MemoryPeak       float64    `json:"memory_peak"`
-	GPUAverage       float64    `json:"gpu_average,omitempty"`
-	GPUPeak          float64    `json:"gpu_peak,omitempty"`
-	LastActivityAt   *time.Time `json:"last_activity_at"`
+	From             time.Time `json:"from"`
+	To               time.Time `json:"to"`
+	SampleCount      int64     `json:"sample_count"`
+	LoginCount       int64     `json:"login_count"`
+	ServerCount      int64     `json:"server_count"`
+	ServerStartCount int64     `json:"server_start_count"`
+	CurrentServers   int64     `json:"current_servers"`
+	RuntimeSeconds   float64   `json:"runtime_seconds"`
+	CPUAverage       float64   `json:"cpu_average"`
+	CPUPeak          float64   `json:"cpu_peak"`
+	MemoryAverage    float64   `json:"memory_average"`
+	MemoryPeak       float64   `json:"memory_peak"`
+	GPUAverage       float64   `json:"gpu_average,omitempty"`
+	GPUPeak          float64   `json:"gpu_peak,omitempty"`
+	// Consumption, integrated from the durable hourly rollup rather than
+	// averaged from raw samples. The averages above describe how hard the pods
+	// worked; these describe how much was used, and they remain correct once
+	// the raw samples have aged out.
+	CPUCoreHours   float64    `json:"cpu_core_hours"`
+	MemoryGBHours  float64    `json:"memory_gb_hours"`
+	GPUHours       float64    `json:"gpu_hours,omitempty"`
+	ObservedRatio  float64    `json:"observed_ratio"`
+	LastActivityAt *time.Time `json:"last_activity_at"`
 }
 
 type UserDetail struct {
@@ -346,6 +354,16 @@ func (s *Store) userUsagePeriods(ctx context.Context, username string, now time.
 			FROM periods p LEFT JOIN server_sessions ss ON lower(ss.username)=lower($1)
 			 AND ss.started_at<=$5 AND COALESCE(ss.ended_at,$5::timestamptz)>=p.from_ts
 			GROUP BY p.label
+	), consumption AS (
+		SELECT p.label,
+		       COALESCE(sum(r.cpu_core_seconds),0)::double precision cpu_core_seconds,
+		       COALESCE(sum(r.memory_byte_seconds),0)::double precision memory_byte_seconds,
+		       COALESCE(sum(r.gpu_seconds),0)::double precision gpu_seconds,
+		       COALESCE(sum(r.covered_seconds),0)::double precision covered_seconds,
+		       COALESCE(sum(r.runtime_seconds),0)::double precision rollup_runtime
+		FROM periods p LEFT JOIN resource_usage_hourly r
+		  ON lower(r.username)=lower($1) AND r.bucket >= p.from_ts AND r.bucket < $5
+		GROUP BY p.label
 	), logins AS (
 		SELECT p.label,count(a.id) login_count,max(a.created_at) last_activity_at
 		FROM periods p LEFT JOIN audit_logs a ON lower(a.actor_username)=lower($1)
@@ -354,8 +372,9 @@ func (s *Store) userUsagePeriods(ctx context.Context, username string, now time.
 	)
 	SELECT p.label,p.from_ts,$5::timestamptz,m.sample_count,l.login_count,s.server_count,s.server_start_count,s.current_servers,
 	       CASE WHEN m.runtime_sample_count>0 THEN m.metric_runtime ELSE s.server_runtime END,m.cpu_average,m.cpu_peak,m.memory_average,m.memory_peak,m.gpu_average,m.gpu_peak,
-	       GREATEST(m.last_activity_at,s.last_activity_at,l.last_activity_at)
-	FROM periods p JOIN metrics m USING(label) JOIN server_usage s USING(label) JOIN logins l USING(label)
+	       GREATEST(m.last_activity_at,s.last_activity_at,l.last_activity_at),
+	       c.cpu_core_seconds,c.memory_byte_seconds,c.gpu_seconds,c.covered_seconds,c.rollup_runtime
+	FROM periods p JOIN metrics m USING(label) JOIN server_usage s USING(label) JOIN logins l USING(label) JOIN consumption c USING(label)
 		ORDER BY p.sort_order`, username, now.Add(-24*time.Hour), now.Add(-7*24*time.Hour), now.Add(-30*24*time.Hour), now, includeGPU)
 	if err != nil {
 		return nil, err
@@ -365,9 +384,16 @@ func (s *Store) userUsagePeriods(ctx context.Context, username string, now time.
 	for rows.Next() {
 		var label string
 		var period UserUsagePeriod
-		if err := rows.Scan(&label, &period.From, &period.To, &period.SampleCount, &period.LoginCount, &period.ServerCount, &period.ServerStartCount, &period.CurrentServers, &period.RuntimeSeconds, &period.CPUAverage, &period.CPUPeak, &period.MemoryAverage, &period.MemoryPeak, &period.GPUAverage, &period.GPUPeak, &period.LastActivityAt); err != nil {
+		var cpuSeconds, memorySeconds, gpuSeconds, coveredSeconds, rollupRuntime float64
+		if err := rows.Scan(&label, &period.From, &period.To, &period.SampleCount, &period.LoginCount, &period.ServerCount, &period.ServerStartCount, &period.CurrentServers, &period.RuntimeSeconds, &period.CPUAverage, &period.CPUPeak, &period.MemoryAverage, &period.MemoryPeak, &period.GPUAverage, &period.GPUPeak, &period.LastActivityAt, &cpuSeconds, &memorySeconds, &gpuSeconds, &coveredSeconds, &rollupRuntime); err != nil {
 			return nil, err
 		}
+		period.CPUCoreHours = cpuSeconds / 3600
+		period.MemoryGBHours = memorySeconds / 3600 / (1 << 30)
+		if includeGPU {
+			period.GPUHours = gpuSeconds / 3600
+		}
+		period.ObservedRatio = observedRatio(coveredSeconds, rollupRuntime)
 		result[label] = period
 	}
 	return result, rows.Err()

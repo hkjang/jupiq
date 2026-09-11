@@ -46,6 +46,29 @@ export function formatMetricNumber(value: unknown): string {
   return rounded
 }
 
+// Consumption is a quantity, not a rate: core-hours and GB-hours answer how
+// much was used, where an average only says how hard the pods worked while they
+// happened to be running.
+export function formatCoreHours(value: unknown): string {
+  const hours = asNumber(value, Number.NaN)
+  if (!Number.isFinite(hours)) return '수집 불가'
+  return `${hours.toLocaleString('ko-KR', { maximumFractionDigits: hours < 10 ? 2 : 0 })} Core·h`
+}
+
+export function formatGbHours(value: unknown): string {
+  const hours = asNumber(value, Number.NaN)
+  if (!Number.isFinite(hours)) return '수집 불가'
+  return `${hours.toLocaleString('ko-KR', { maximumFractionDigits: hours < 10 ? 2 : 0 })} GB·h`
+}
+
+// A bucket built while collection was down describes less than it appears to,
+// so the share of runtime that was actually sampled is shown next to the total.
+export function formatObservedRatio(value: unknown): string {
+  const ratio = asNumber(value, Number.NaN)
+  if (!Number.isFinite(ratio)) return '—'
+  return `${(ratio * 100).toLocaleString('ko-KR', { maximumFractionDigits: 0 })}%`
+}
+
 export function normalizePercentValue(value: unknown): number {
   const number = asNumber(value)
   return Math.abs(number) <= 1 ? number * 100 : number

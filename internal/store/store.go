@@ -163,7 +163,7 @@ func (s *Store) Seed(ctx context.Context, username, password string) error {
 		return err
 	}
 	defaults := map[string]any{
-		"system":        map[string]any{"raw_retention_days": 30},
+		"system":        map[string]any{"raw_retention_days": 30, "usage_retention_days": 365},
 		"workflow":      map[string]any{"approval_enabled": false, "manager_review_enabled": false, "require_reason": false, "request_types": []string{}},
 		"auth.oidc":     map[string]any{"enabled": false, "issuer_url": "", "client_id": "", "redirect_url": "", "scopes": []string{"openid", "profile", "email"}, "username_claim": "preferred_username", "auto_create_users": true, "verify_tls": true},
 		"ai":            map[string]any{"enabled": false, "provider": "openai-compatible", "base_url": "", "model": "", "max_tokens": 4096, "streaming": true, "verify_tls": true},

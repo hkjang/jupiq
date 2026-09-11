@@ -512,7 +512,7 @@ export function SettingsPage() {
 
   const general = (
     <Row gutter={[16, 16]}>
-      <Col xs={24} xl={12}><Card title="데이터 보존"><Form.Item name={['system', 'raw_retention_days']} label="원시 메트릭 보존(일)" extra="CPU·메모리와 선택 기능 원시 메트릭 정리에 실제 적용됩니다."><InputNumber min={1} max={365} style={{ width: '100%' }} /></Form.Item></Card></Col>
+      <Col xs={24} xl={12}><Card title="데이터 보존"><Form.Item name={['system', 'raw_retention_days']} label="원시 메트릭 보존(일)" extra="CPU·메모리와 선택 기능 원시 메트릭 정리에 실제 적용됩니다."><InputNumber min={1} max={365} style={{ width: '100%' }} /></Form.Item><Form.Item name={['system', 'usage_retention_days']} label="사용량 집계 보존(일)" extra="시간 단위로 적분한 사용자별 CPU·메모리 소비량의 보존 기간입니다. 원시 표본보다 훨씬 작아 길게 잡아도 부담이 적고, 원시 표본이 삭제된 뒤 남는 유일한 기록입니다."><InputNumber min={1} max={3650} style={{ width: '100%' }} /></Form.Item></Card></Col>
       <Col xs={24} xl={12}><Card title="고정 동작과 개별 주기"><Typography.Paragraph type="secondary">서비스명은 jupiq, 기본 UI 언어는 한국어로 고정됩니다. 목록 표시 수는 각 화면에서 선택하고, JupyterHub 수집 주기는 Hub 등록·편집 Drawer에서 Hub별로 설정합니다.</Typography.Paragraph><Alert type="info" showIcon message="시간은 원본 시각과 브라우저 표시 시각을 구분합니다" description="서버 데이터는 UTC 기준 시각으로 보존하고 화면에서는 브라우저의 지역 시각으로 표시합니다." /></Card></Col>
     </Row>
   )

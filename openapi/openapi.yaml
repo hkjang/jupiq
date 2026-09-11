@@ -170,6 +170,53 @@ paths:
         - { name: group_by, in: query, schema: { type: string, enum: [user, hub, network, department, project] } }
       responses:
         '200': { $ref: '#/components/responses/Success' }
+  /usage/consumption:
+    get:
+      tags: [Operations]
+      operationId: getResourceConsumption
+      summary: 사용자별 CPU·메모리 소비량 조회
+      description: >-
+        JupyterHub 파드의 표본을 시간으로 적분한 누적 소비량을 사용자·Hub·망·부서별로
+        반환한다. /usage의 평균·최대는 사용률이라 1코어를 하루 점유한 경우와 5분 점유한
+        경우를 구분하지 못하며, 이 엔드포인트는 core-hours와 GB-hours로 그 차이를 답한다.
+        원시 표본이 raw_retention_days로 삭제된 뒤에도 usage_retention_days 동안 유지된다.
+        observed_ratio는 해당 구간의 실행시간 중 표본이 실제로 관측된 비율이며, 값이 낮으면
+        사용량이 적었던 것이 아니라 수집이 중단됐다는 뜻이다.
+      x-required-permission: usage:read
+      parameters:
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - name: group_by
+          in: query
+          schema: { type: string, enum: [user, hub, network, department], default: user }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+      responses:
+        '200':
+          description: 누적 소비량
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        group: { type: string }
+                        group_by: { type: string }
+                        cpu_core_hours: { type: number, description: 적분된 CPU 소비량(코어·시간) }
+                        memory_gb_hours: { type: number, description: 적분된 메모리 소비량(GB·시간) }
+                        gpu_hours: { type: number, description: GPU 모니터링이 켜진 경우에만 포함 }
+                        cpu_peak_cores: { type: number }
+                        memory_peak_bytes: { type: number }
+                        runtime_seconds: { type: number }
+                        observed_ratio: { type: number, minimum: 0, maximum: 1 }
+                  rolled_up_through:
+                    type: string
+                    format: date-time
+                    description: 집계가 완료된 마지막 시각. 진행 중인 시간대는 제외된다.
+        '400': { $ref: '#/components/responses/Error' }
   /llm-usage:
     get:
       tags: [Operations]

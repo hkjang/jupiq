@@ -95,11 +95,25 @@ func (c *Collector) waitForHubs() {
 	}
 }
 
+// rollUpUsage folds raw samples into durable per-user consumption buckets. It
+// runs before prune on purpose: prune deletes raw samples on the retention
+// window, and anything not yet integrated at that point could never be
+// accounted for afterwards.
+func (c *Collector) rollUpUsage(ctx context.Context) {
+	through, err := c.Store.RollUpResourceUsage(ctx, time.Now().UTC())
+	if err != nil {
+		c.Logger.Warn("resource usage rollup failed", "error", err)
+		return
+	}
+	c.Logger.Debug("resource usage rolled up", "through", through)
+}
+
 func (c *Collector) collect(ctx context.Context) {
 	c.collectHubs(ctx)
 	c.collectKubernetes(ctx)
 	c.collectPrometheus(ctx)
 	c.collectLLMUsage(ctx)
+	c.rollUpUsage(ctx)
 	c.prune(ctx)
 }
 
@@ -451,7 +465,8 @@ func (c *Collector) prune(ctx context.Context) {
 		return
 	}
 	var system struct {
-		RawRetentionDays int `json:"raw_retention_days"`
+		RawRetentionDays   int `json:"raw_retention_days"`
+		UsageRetentionDays int `json:"usage_retention_days"`
 	}
 	var llm struct {
 		RetentionDays int `json:"retention_days"`
@@ -468,6 +483,11 @@ func (c *Collector) prune(ctx context.Context) {
 	}
 	if err := c.Store.PruneMetrics(ctx, system.RawRetentionDays, llm.RetentionDays); err != nil {
 		c.Logger.Warn("metric retention prune failed", "error", err)
+		c.pruneFailed()
+		return
+	}
+	if err := c.Store.PruneResourceUsage(ctx, system.UsageRetentionDays); err != nil {
+		c.Logger.Warn("resource usage retention prune failed", "error", err)
 		c.pruneFailed()
 	}
 }
