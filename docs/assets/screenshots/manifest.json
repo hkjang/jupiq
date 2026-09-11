@@ -23,6 +23,7 @@
   {"path":"/personal?tab=profile","file":"personal-profile.webp","viewport":"desktop","condition":"authenticated"},
   {"path":"/personal?tab=keys","file":"personal-keys.webp","viewport":"desktop","condition":"key-rotation"},
   {"path":"/admin/settings","file":"admin-settings.webp","viewport":"desktop","condition":"admin"},
+  {"path":"/admin/settings","file":"admin-roles.webp","viewport":"desktop","condition":"role-management"},
   {"path":"/dashboard","file":"profile-menu.webp","viewport":"desktop","condition":"profile-menu-open"},
   {"path":"/unknown-route","file":"not-found.webp","viewport":"desktop","condition":"authenticated"},
   {"path":"/dashboard","file":"dashboard-mobile.webp","viewport":"mobile","condition":"fresh-demo-data"},

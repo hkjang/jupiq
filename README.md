@@ -16,7 +16,7 @@
 - 스트리밍 AI 운영 분석, REST/OpenAPI와 MCP
 - 단일 Docker 이미지 tar.gz로 오프라인망 배포
 
-홍보 사이트와 전체 가이드는 [jupiq GitHub Pages](https://hkjang.github.io/jupiq/)에서 볼 수 있습니다.
+화면 캡처가 들어간 [사용자 가이드](docs/USER_GUIDE.md)와 [관리자 가이드](docs/ADMIN_GUIDE.md)가 정본이며, 각각 PDF도 함께 있습니다. 홍보 사이트는 [jupiq GitHub Pages](https://hkjang.github.io/jupiq/)에서 볼 수 있습니다.
 
 ## 기술 스택
 
@@ -138,13 +138,20 @@ GPU와 LLM Chat Completions 모니터링은 초기 **OFF**입니다.
 
 ## 문서
 
+정본 가이드는 저장소 안에 있습니다. 화면 캡처가 함께 들어 있습니다.
+
+- [사용자 가이드](docs/USER_GUIDE.md) ([PDF](docs/USER_GUIDE.pdf))
+- [관리자 가이드](docs/ADMIN_GUIDE.md) ([PDF](docs/ADMIN_GUIDE.pdf))
+
+홍보 사이트의 나머지 문서:
+
 - [기능](https://hkjang.github.io/jupiq/features/)
 - [아키텍처](https://hkjang.github.io/jupiq/architecture/)
 - [보안](https://hkjang.github.io/jupiq/security/)
 - [설치](https://hkjang.github.io/jupiq/install/)
 - [오프라인 운영](https://hkjang.github.io/jupiq/offline/)
-- [사용자 가이드](https://hkjang.github.io/jupiq/user-guide/)
-- [관리자 가이드](https://hkjang.github.io/jupiq/admin-guide/)
+- [사용자 가이드 요약](https://hkjang.github.io/jupiq/user-guide/)
+- [관리자 가이드 요약](https://hkjang.github.io/jupiq/admin-guide/)
 - [API·MCP](https://hkjang.github.io/jupiq/api-mcp/)
 - [릴리스 안내](https://hkjang.github.io/jupiq/releases/)
 
