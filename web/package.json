@@ -1,7 +1,7 @@
 {
   "name": "jupiq-web",
   "private": true,
-  "version": "1.4.13",
+  "version": "1.4.14",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
