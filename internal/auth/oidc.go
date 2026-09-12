@@ -28,15 +28,27 @@ type OIDCConfig struct {
 	UsernameClaim   string   `json:"username_claim"`
 	AutoCreateUsers bool     `json:"auto_create_users"`
 	VerifyTLS       bool     `json:"verify_tls"`
+	// AutoLogin lets the browser sign a visitor in silently (prompt=none) when
+	// the identity provider still holds a session. Off by default: the redirect
+	// only ever starts from this setting, never from a query string alone.
+	AutoLogin bool `json:"auto_login"`
 }
 
 type oidcState struct {
-	State        string    `json:"state"`
-	Nonce        string    `json:"nonce"`
-	CodeVerifier string    `json:"code_verifier"`
-	ReturnTo     string    `json:"return_to,omitempty"`
-	ExpiresAt    time.Time `json:"expires_at"`
+	State        string `json:"state"`
+	Nonce        string `json:"nonce"`
+	CodeVerifier string `json:"code_verifier"`
+	ReturnTo     string `json:"return_to,omitempty"`
+	// Silent records that this attempt used prompt=none, so a provider refusal
+	// on the callback is treated as an ordinary "no session" answer.
+	Silent    bool      `json:"silent,omitempty"`
+	ExpiresAt time.Time `json:"expires_at"`
 }
+
+const oidcStateContext = "oidc-state"
+
+// LoginPath is the SPA route that renders the sign-in screen.
+const LoginPath = "/login"
 
 // DefaultReturnTo is where a completed SSO login lands when the browser did not
 // ask for a specific page. The SPA resolves "/" to the integrated dashboard for
@@ -87,11 +99,15 @@ func (s *Service) oidcConfigAndSecret(ctx context.Context) (OIDCConfig, string, 
 	return cfg, secret, configured, err
 }
 
-func (s *Service) OIDCLogin(ctx context.Context, redirectOverride, returnTo string) (string, string, time.Time, error) {
+// OIDCLogin builds the authorization redirect and the encrypted state cookie.
+// silent asks for prompt=none; it is honoured only while auto_login is on, so
+// anyone appending ?prompt=none to the URL gets the ordinary login instead.
+func (s *Service) OIDCLogin(ctx context.Context, redirectOverride, returnTo string, silent bool) (string, string, time.Time, error) {
 	cfg, secret, configured, err := s.oidcConfigAndSecret(ctx)
 	if err != nil || !cfg.Enabled || !configured || cfg.IssuerURL == "" || cfg.ClientID == "" {
 		return "", "", time.Time{}, errors.New("OIDC 로그인이 설정되지 않았습니다")
 	}
+	silent = SilentLoginAllowed(cfg, silent)
 	if cfg.RedirectURL == "" {
 		cfg.RedirectURL = redirectOverride
 	}
@@ -110,9 +126,8 @@ func (s *Service) OIDCLogin(ctx context.Context, redirectOverride, returnTo stri
 	nonce, _ := secure.RandomToken(24)
 	verifier, _ := secure.RandomToken(48)
 	expires := time.Now().UTC().Add(10 * time.Minute)
-	stateValue := oidcState{State: state, Nonce: nonce, CodeVerifier: verifier, ReturnTo: SanitizeReturnTo(returnTo), ExpiresAt: expires}
-	raw, _ := json.Marshal(stateValue)
-	encrypted, err := s.Cipher.EncryptString(string(raw), "oidc-state")
+	stateValue := oidcState{State: state, Nonce: nonce, CodeVerifier: verifier, ReturnTo: SanitizeReturnTo(returnTo), Silent: silent, ExpiresAt: expires}
+	encrypted, err := s.sealOIDCState(stateValue)
 	if err != nil {
 		return "", "", time.Time{}, err
 	}
@@ -122,18 +137,77 @@ func (s *Service) OIDCLogin(ctx context.Context, redirectOverride, returnTo stri
 	oauthConfig := oauth2.Config{ClientID: cfg.ClientID, ClientSecret: secret, Endpoint: provider.Endpoint(), RedirectURL: cfg.RedirectURL, Scopes: cfg.Scopes}
 	sum := sha256.Sum256([]byte(verifier))
 	challenge := base64.RawURLEncoding.EncodeToString(sum[:])
-	authURL := oauthConfig.AuthCodeURL(state, oidc.Nonce(nonce), oauth2.SetAuthURLParam("code_challenge", challenge), oauth2.SetAuthURLParam("code_challenge_method", "S256"))
-	return authURL, encrypted, expires, nil
+	options := []oauth2.AuthCodeOption{oidc.Nonce(nonce), oauth2.SetAuthURLParam("code_challenge", challenge), oauth2.SetAuthURLParam("code_challenge_method", "S256")}
+	if silent {
+		// prompt=none never renders provider UI: either a code comes straight
+		// back or the callback receives error=login_required.
+		options = append(options, oauth2.SetAuthURLParam("prompt", "none"))
+	}
+	return oauthConfig.AuthCodeURL(state, options...), encrypted, expires, nil
 }
 
-func (s *Service) OIDCCallback(ctx context.Context, code, state, stateCookie, redirectOverride string) (store.User, string, error) {
-	plain, err := s.Cipher.DecryptString(stateCookie, "oidc-state")
+// SilentLoginAllowed decides whether a requested silent attempt may proceed.
+// The setting must be on and OIDC itself enabled; otherwise the request is
+// downgraded to the normal login rather than rejected, so nothing changes for
+// an installation that never turned auto_login on.
+func SilentLoginAllowed(cfg OIDCConfig, requested bool) bool {
+	return requested && cfg.Enabled && cfg.AutoLogin
+}
+
+func (s *Service) sealOIDCState(value oidcState) (string, error) {
+	raw, err := json.Marshal(value)
 	if err != nil {
-		return store.User{}, DefaultReturnTo, errors.New("OIDC state 쿠키가 유효하지 않습니다")
+		return "", err
+	}
+	return s.Cipher.EncryptString(string(raw), oidcStateContext)
+}
+
+func (s *Service) openOIDCState(stateCookie, state string) (oidcState, error) {
+	plain, err := s.Cipher.DecryptString(stateCookie, oidcStateContext)
+	if err != nil {
+		return oidcState{}, errors.New("OIDC state 쿠키가 유효하지 않습니다")
 	}
 	var saved oidcState
 	if json.Unmarshal([]byte(plain), &saved) != nil || saved.State != state || time.Now().After(saved.ExpiresAt) {
-		return store.User{}, DefaultReturnTo, errors.New("OIDC state가 만료되었거나 일치하지 않습니다")
+		return oidcState{}, errors.New("OIDC state가 만료되었거나 일치하지 않습니다")
+	}
+	return saved, nil
+}
+
+// OIDCRefusal interprets a callback that carried an error parameter instead of
+// a code. It reports whether the interrupted attempt was silent and where the
+// visitor originally wanted to go. When the state cannot be read the attempt
+// is reported as not silent, which the login page treats as "do not retry".
+func (s *Service) OIDCRefusal(stateCookie, state string) (silent bool, returnTo string) {
+	saved, err := s.openOIDCState(stateCookie, state)
+	if err != nil {
+		return false, DefaultReturnTo
+	}
+	return saved.Silent, SanitizeReturnTo(saved.ReturnTo)
+}
+
+// LoginPathAfterRefusal is where the browser lands after the provider declined
+// to answer. sso=none marks a silent attempt that found no session — the
+// ordinary outcome of prompt=none — and sso=error any other provider error.
+// The browser stops retrying when either marker is present in the address, so
+// the marker survives even when its sessionStorage was cleared meanwhile.
+func LoginPathAfterRefusal(silent bool, returnTo string) string {
+	values := url.Values{}
+	if silent {
+		values.Set("sso", "none")
+	} else {
+		values.Set("sso", "error")
+	}
+	if returnTo = SanitizeReturnTo(returnTo); returnTo != DefaultReturnTo {
+		values.Set("return_to", returnTo)
+	}
+	return LoginPath + "?" + values.Encode()
+}
+
+func (s *Service) OIDCCallback(ctx context.Context, code, state, stateCookie, redirectOverride string) (store.User, string, error) {
+	saved, err := s.openOIDCState(stateCookie, state)
+	if err != nil {
+		return store.User{}, DefaultReturnTo, err
 	}
 	cfg, secret, configured, err := s.oidcConfigAndSecret(ctx)
 	if err != nil {

@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { ApiError, jsonBody, request } from '../api/client'
 import type { OidcConfig, User, VersionInfo } from '../types'
 import { hasAnyGrantedPermission, hasGrantedPermission } from '../utils/permissions'
+import { clearSilentSsoState, markSignedOut } from './silentSso'
 
 interface AuthContextValue {
   user: User | null
@@ -86,7 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       ])
       if (!active) return
       if (versionResult.status === 'fulfilled') setVersion({ ...versionResult.value, version: versionResult.value.version || '확인 불가' })
-      if (oidcResult.status === 'fulfilled') setOidc({ ...oidcResult.value, enabled: Boolean(oidcResult.value.enabled) })
+      if (oidcResult.status === 'fulfilled') setOidc({ ...oidcResult.value, enabled: Boolean(oidcResult.value.enabled), auto_login: Boolean(oidcResult.value.auto_login) })
       try {
         await refreshUser()
       } catch { /* refreshUser가 미인증과 인증 서비스 장애를 구분해 기록합니다. */ } finally {
@@ -114,6 +115,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (user) void refreshFeatures()
   }, [user, refreshFeatures])
 
+  // A session exists again, so a later visit may try the silent sign-in once
+  // more. Clearing here (rather than in login) also covers SSO callbacks.
+  useEffect(() => {
+    if (user) clearSilentSsoState()
+  }, [user])
+
   const login = useCallback(async (username: string, password: string) => {
     const payload = await request<User | { user?: User }>('/auth/login', {
       method: 'POST',
@@ -126,6 +133,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refreshUser])
 
   const logout = useCallback(async () => {
+    // Marked before the request so a deliberate sign-out is never followed by
+    // a silent re-login, even if the logout call itself fails.
+    markSignedOut()
     try {
       await request('/auth/logout', { method: 'POST' })
     } finally {

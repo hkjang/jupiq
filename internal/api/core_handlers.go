@@ -674,7 +674,7 @@ var allowedSettingKeys = map[string]bool{
 var allowedSettingFields = map[string]map[string]bool{
 	"system":        {"raw_retention_days": true, "usage_retention_days": true},
 	"workflow":      {"approval_enabled": true, "manager_review_enabled": true, "require_reason": true, "request_types": true},
-	"auth.oidc":     {"enabled": true, "issuer_url": true, "client_id": true, "redirect_url": true, "scopes": true, "username_claim": true, "auto_create_users": true, "verify_tls": true},
+	"auth.oidc":     {"enabled": true, "issuer_url": true, "client_id": true, "redirect_url": true, "scopes": true, "username_claim": true, "auto_create_users": true, "verify_tls": true, "auto_login": true},
 	"ai":            {"enabled": true, "provider": true, "base_url": true, "model": true, "max_tokens": true, "streaming": true, "verify_tls": true},
 	"prometheus":    {"enabled": true, "base_url": true, "verify_tls": true, "queries": true},
 	"kubernetes":    {"enabled": true, "base_url": true, "verify_tls": true, "namespace": true, "label_selector": true, "pod_username_regex": true},
@@ -736,7 +736,7 @@ func validateSettingSection(key string, object map[string]any) error {
 	boolFields := map[string][]string{
 		"features":      {"gpu_monitoring", "llm_usage_monitoring"},
 		"workflow":      {"approval_enabled", "manager_review_enabled", "require_reason"},
-		"auth.oidc":     {"enabled", "auto_create_users", "verify_tls"},
+		"auth.oidc":     {"enabled", "auto_create_users", "verify_tls", "auto_login"},
 		"ai":            {"enabled", "streaming", "verify_tls"},
 		"prometheus":    {"enabled", "verify_tls"},
 		"kubernetes":    {"enabled", "verify_tls"},

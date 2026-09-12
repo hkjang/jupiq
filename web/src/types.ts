@@ -34,6 +34,8 @@ export interface VersionInfo extends ApiRecord {
 
 export interface OidcConfig extends ApiRecord {
   enabled: boolean
+  // Published by the server only while the administrator turned auto_login on.
+  auto_login?: boolean
   provider_name?: string
 }
 

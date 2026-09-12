@@ -3,6 +3,7 @@ import { Alert, Button, Card, Divider, Flex, Form, Input, Space, Tag, Typography
 import { useState } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
+import { SSO_MARKER_PARAM, safeReturnTo } from '../auth/silentSso'
 import { serviceVersionLabel } from '../utils/navigation'
 
 interface LoginForm { username: string; password: string }
@@ -13,7 +14,13 @@ export function LoginPage() {
   const location = useLocation()
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
-  const from = (location.state as { from?: string } | null)?.from || '/'
+  // A refused SSO attempt arrives here as a full-page redirect, so the deep
+  // link travels in the query string instead of router state.
+  const query = new URLSearchParams(location.search)
+  const from = (location.state as { from?: string } | null)?.from || safeReturnTo(query.get('return_to') || '/')
+  // sso=none is the ordinary "no provider session" answer and needs no notice;
+  // sso=error means the provider declined for another reason.
+  const ssoError = query.get(SSO_MARKER_PARAM) === 'error'
 
   if (!loading && user) return <Navigate to={from} replace />
 
@@ -34,8 +41,7 @@ export function LoginPage() {
   // redirects there after the callback, so a deep link survives SSO and a plain
   // sign-in lands on "/" - the integrated dashboard for accounts that may read it.
   const startOidc = () => {
-    const returnTo = from.startsWith('/') && !from.startsWith('//') ? from : '/'
-    window.location.assign(`/api/v1/auth/oidc/login?return_to=${encodeURIComponent(returnTo)}`)
+    window.location.assign(`/api/v1/auth/oidc/login?return_to=${encodeURIComponent(safeReturnTo(from))}`)
   }
 
   return (
@@ -60,6 +66,7 @@ export function LoginPage() {
             <Typography.Title level={2}>jupiq에 로그인</Typography.Title>
           </Space>
           {error && <Alert type="error" showIcon message="로그인 실패" description={error} closable onClose={() => setError('')} />}
+          {ssoError && !error && <Alert type="warning" showIcon message="SSO 로그인이 완료되지 않았습니다" description="인증 서버가 로그인을 거절했습니다. 다시 시도하거나 비상 관리자 계정으로 로그인하세요." />}
           {oidc.enabled && (
             <>
               <Button size="large" block type="primary" icon={<SafetyCertificateOutlined />} onClick={startOidc}>
