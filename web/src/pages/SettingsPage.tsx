@@ -6,6 +6,7 @@ import {
   DeleteOutlined,
   EditOutlined,
   ExperimentOutlined,
+  EyeOutlined,
   GlobalOutlined,
   LinkOutlined,
   LockOutlined,
@@ -55,7 +56,7 @@ import {
 import { NativeSelect } from '../components/NativeSelect'
 import { stableRowKey } from '../utils/rowKey'
 import { sorterFor } from '../utils/sorting'
-import { resolveOidcSettings } from '../utils/settings'
+import { addAllowedHost, resolveOidcSettings } from '../utils/settings'
 import { AsyncState } from '../components/AsyncState'
 import { PageHeader } from '../components/PageHeader'
 
@@ -414,6 +415,62 @@ function RoleManager({ canWrite, canAssign }: { canWrite: boolean; canAssign: bo
   </>
 }
 
+interface AnalyticsViolation extends ApiRecord {
+  origin: string
+  directive: string
+  page?: string
+  count: number
+  last_seen: string
+  allowed: boolean
+}
+
+const analyticsProviderOptions = [
+  { value: 'momento', label: 'Momento (사내 수집기)' },
+  { value: 'ga4', label: 'Google Analytics 4' },
+  { value: 'gtm', label: 'Google Tag Manager' },
+  { value: 'matomo', label: 'Matomo' },
+  { value: 'custom', label: '직접 붙여넣기' },
+]
+
+// 브라우저가 CSP report-uri로 신고한 차단 출처. 추적 스니펫이 조용히 막힐 때
+// 콘솔을 열지 않고도 무엇을 허용해야 하는지 보여 주는 진단 목록이다.
+function AnalyticsViolationsCard({ canWrite, onAllow }: { canWrite: boolean; onAllow: (origin: string) => void }) {
+  const { message } = App.useApp()
+  const { data, loading, refreshing, error, reload } = useApi<{ items: AnalyticsViolation[]; total: number }>('/analytics/violations')
+  const [clearing, setClearing] = useState(false)
+  const items = data?.items || []
+
+  const clear = async () => {
+    setClearing(true)
+    try {
+      await request('/analytics/violations', { method: 'DELETE' })
+      message.success('차단 기록을 비웠습니다.')
+      await reload()
+    } catch (caught) {
+      if (caught instanceof Error) message.error(caught.message)
+    } finally {
+      setClearing(false)
+    }
+  }
+
+  return (
+    <Card title={<Space><WarningOutlined />정책이 막은 출처</Space>} extra={<Space><Button size="small" onClick={() => void reload()} loading={refreshing}>새로고침</Button>{canWrite && <Popconfirm title="차단 기록을 비울까요?" description="스니펫을 고친 뒤 아직 막히는 것이 있는지 다시 확인할 때 씁니다." onConfirm={() => void clear()}><Button size="small" danger loading={clearing} disabled={!items.length}>기록 지우기</Button></Popconfirm>}</Space>}>
+      <Typography.Paragraph type="secondary">추적이 켜진 화면에서 브라우저가 거부한 주소입니다. 서버 메모리에 서로 다른 출처 100개까지만 남고 재시작하면 사라집니다. <strong>허용 목록에 추가</strong>를 누른 뒤 <strong>설정 저장</strong>을 해야 정책에 반영됩니다.</Typography.Paragraph>
+      <AsyncState loading={loading && !data} refreshing={refreshing} error={error && !data ? error : null} onRetry={reload} empty={!loading && !items.length} emptyDescription="기록된 차단이 없습니다. 추적을 켜고 화면을 한 번 열면 막힌 출처가 여기에 나타납니다.">
+        <Table<AnalyticsViolation> size="small" rowKey={(row) => `${row.directive} ${row.origin}`} dataSource={items} pagination={false} columns={[
+          { title: '출처', dataIndex: 'origin', render: (value: string) => <Typography.Text code>{value}</Typography.Text> },
+          { title: '지시어', dataIndex: 'directive', width: 140, render: (value: string) => <Tag>{value}</Tag> },
+          { title: '횟수', dataIndex: 'count', width: 80, align: 'right' },
+          { title: '마지막', dataIndex: 'last_seen', width: 180, render: (value: string) => formatDate(value) },
+          { title: '상태', key: 'state', width: 200, render: (_value, row) => row.allowed
+            ? <Tag color="success">현재 설정이 허용</Tag>
+            : canWrite ? <Button size="small" type="link" onClick={() => onAllow(row.origin)}>허용 목록에 추가</Button> : <Tag color="warning">차단됨</Tag> },
+        ]} />
+      </AsyncState>
+    </Card>
+  )
+}
+
 export function SettingsPage() {
   const { message } = App.useApp()
   const { refreshFeatures, hasGlobalPermission } = useAuth()
@@ -435,6 +492,7 @@ export function SettingsPage() {
       ...safe,
       oidc: resolveOidcSettings(safe),
       features: { gpu_monitoring: false, llm_usage_monitoring: false, ...(safe.features as ApiRecord || {}) },
+      analytics: { enabled: false, provider: 'momento', momento_proxy: true, momento_verify_tls: true, include_admin: false, placement: 'head', allowed_hosts: '', ...(safe.analytics as ApiRecord || {}) },
       workflow: { approval_enabled: false, ...(safe.workflow as ApiRecord || {}) },
       ai: { streaming: true, ...(safe.ai as ApiRecord || {}) },
       prometheus: {
@@ -562,6 +620,51 @@ export function SettingsPage() {
     </IntegrationCard>
   )
 
+  const allowAnalyticsHost = (origin: string) => {
+    const current = String(form.getFieldValue(['analytics', 'allowed_hosts']) || '')
+    const next = addAllowedHost(current, origin)
+    if (next === current) { message.info('이미 허용 목록에 있는 출처입니다.'); return }
+    form.setFieldValue(['analytics', 'allowed_hosts'], next)
+    setDirty(true)
+    message.success(`${origin}을(를) 허용 목록에 넣었습니다. 설정 저장을 눌러 반영하세요.`)
+  }
+
+  const analytics = (
+    <Row gutter={[16, 16]}>
+      <Col xs={24} xl={12}>
+        <Card title={<Space><EyeOutlined />방문 추적 스크립트</Space>}>
+          <Alert className="data-note" type="info" showIcon message="기본값은 꺼짐이며, 켜도 정책은 느슨해지지 않습니다" description="화면 응답의 Content-Security-Policy는 script-src 'self'로 잠겨 있습니다. 추적을 켜면 요청마다 nonce를 만들어 스니펫의 모든 <script>에 붙이고 같은 nonce를 정책에 넣습니다. 'unsafe-inline'은 쓰지 않습니다. API·MCP·상태 확인 경로에는 붙지 않습니다." />
+          <Form.Item name={['analytics', 'enabled']} label="방문 추적 사용" valuePropName="checked" extra="저장하면 다음 화면 로딩부터 스니펫이 들어갑니다."><Switch checkedChildren="사용" unCheckedChildren="사용 안 함" /></Form.Item>
+          <Form.Item name={['analytics', 'provider']} label="수집 도구" extra="Momento는 사내 자체 호스팅 수집기라 데이터가 밖으로 나가지 않는 유일한 선택지입니다."><NativeSelect options={analyticsProviderOptions} /></Form.Item>
+          <Form.Item noStyle shouldUpdate={(previous, current) => (previous.analytics as ApiRecord | undefined)?.provider !== (current.analytics as ApiRecord | undefined)?.provider || (previous.analytics as ApiRecord | undefined)?.momento_proxy !== (current.analytics as ApiRecord | undefined)?.momento_proxy}>
+            {() => {
+              const provider = String(form.getFieldValue(['analytics', 'provider']) || 'momento')
+              const proxied = Boolean(form.getFieldValue(['analytics', 'momento_proxy']))
+              if (provider === 'momento') return <>
+                <Form.Item name={['analytics', 'momento_url']} label="Momento 수집기 주소" rules={[{ type: 'url', warningOnly: true }]}><Input placeholder="https://momento.internal" /></Form.Item>
+                <Form.Item name={['analytics', 'momento_site_id']} label="사이트 ID"><Input placeholder="SITE_XXXXXXXX" /></Form.Item>
+                <Form.Item name={['analytics', 'momento_proxy']} label="같은 오리진 프록시" valuePropName="checked" extra={proxied ? 'jupiq가 /momento/* 를 수집기로 넘깁니다. 추적기 로더와 수집 요청만 통과하며 세션 쿠키는 보내지 않습니다. 외부 출처가 정책에 등장하지 않아 CSP를 바꿀 수 없는 설치에 알맞습니다.' : '브라우저가 수집기 주소로 직접 접속합니다. 수집기 출처가 script-src·connect-src·img-src에 자동으로 더해집니다.'}><Switch checkedChildren="프록시" unCheckedChildren="직접 접속" /></Form.Item>
+                {proxied && <Form.Item name={['analytics', 'momento_verify_tls']} label="수집기 TLS 검증" valuePropName="checked"><Switch /></Form.Item>}
+              </>
+              if (provider === 'ga4' || provider === 'gtm') return <Form.Item name={['analytics', 'measurement_id']} label={provider === 'ga4' ? '측정 ID' : '컨테이너 ID'} extra="googletagmanager.com·google-analytics.com 출처가 정책에 자동으로 더해집니다. 사외로 데이터가 나갑니다."><Input placeholder={provider === 'ga4' ? 'G-XXXXXXXXXX' : 'GTM-XXXXXXX'} /></Form.Item>
+              if (provider === 'matomo') return <>
+                <Form.Item name={['analytics', 'matomo_url']} label="Matomo 주소" rules={[{ type: 'url', warningOnly: true }]}><Input placeholder="https://matomo.internal" /></Form.Item>
+                <Form.Item name={['analytics', 'matomo_site_id']} label="사이트 ID"><Input placeholder="1" /></Form.Item>
+              </>
+              return <Form.Item name={['analytics', 'custom_snippet']} label="추적 코드" extra="8KB까지. 스니펫 안의 http(s) 주소를 읽어 정책 출처로 더하고, 모든 <script>에 nonce를 붙입니다." rules={[{ max: 8192, message: '추적 코드는 8KB를 넘을 수 없습니다.' }]}><Input.TextArea rows={8} placeholder={'<script async src="https://tracker.internal/t.js" data-site="..."></script>'} /></Form.Item>
+            }}
+          </Form.Item>
+          <Form.Item name={['analytics', 'allowed_hosts']} label="추가 허용 출처" extra="스니펫에서 자동으로 읽지 못한 출처를 쉼표나 줄바꿈으로 나눠 적습니다. 오른쪽 목록의 '허용 목록에 추가'가 여기에 넣습니다."><Input.TextArea rows={3} placeholder="https://pixel.internal, https://cdn.internal" /></Form.Item>
+          <Row gutter={16}>
+            <Col xs={24} md={12}><Form.Item name={['analytics', 'include_admin']} label="관리 화면도 추적" valuePropName="checked" extra="/admin 경로로 처음 진입한 화면에도 붙입니다."><Switch checkedChildren="포함" unCheckedChildren="제외" /></Form.Item></Col>
+            <Col xs={24} md={12}><Form.Item name={['analytics', 'placement']} label="삽입 위치"><NativeSelect options={[{ value: 'head', label: '</head> 앞' }, { value: 'body', label: '</body> 앞' }]} /></Form.Item></Col>
+          </Row>
+        </Card>
+      </Col>
+      <Col xs={24} xl={12}><AnalyticsViolationsCard canWrite={canWriteSettings} onAllow={allowAnalyticsHost} /></Col>
+    </Row>
+  )
+
   const security = (
     <Row gutter={[16, 16]}><Col xs={24} xl={12}><Card title={<Space><LockOutlined />개인 API 키 정책</Space>}><Form.Item name={['security', 'key_rotation_days']} label="기본 회전 주기(일)"><InputNumber min={1} max={3650} style={{ width: '100%' }} /></Form.Item><Form.Item name={['security', 'key_max_lifetime_days']} label="최대 유효기간(일)"><InputNumber min={1} max={3650} style={{ width: '100%' }} /></Form.Item><Form.Item name={['security', 'key_permissions']} label="허용 권한"><Select virtual={false} mode="tags" placeholder="예: hubs:read" /></Form.Item></Card></Col><Col xs={24} xl={12}><Card title="비밀값 암호화"><Alert type="success" showIcon message="비밀값은 애플리케이션 암호화 후 저장됩니다" description="ENCRYPTION_KEY는 환경변수로만 주입되며 관리자 화면에서 조회하거나 변경할 수 없습니다." /></Card></Col>{hasGlobalPermission('roles:read') && <Col xs={24}><RoleManager canWrite={hasGlobalPermission('roles:write')} canAssign={hasGlobalPermission('roles:write') && hasGlobalPermission('users:read')} /></Col>}</Row>
   )
@@ -573,6 +676,7 @@ export function SettingsPage() {
     { key: 'llm-usage', label: 'LLM 사용량', icon: <RobotOutlined />, children: llmUsage },
     { key: 'workflow', label: '승인 프로세스', icon: <CheckCircleOutlined />, children: workflow },
     { key: 'security', label: '보안·키 권한', icon: <LockOutlined />, children: security },
+    { key: 'analytics', label: '방문 추적', icon: <EyeOutlined />, children: analytics },
   ]
 
   return (

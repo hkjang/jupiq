@@ -564,6 +564,37 @@ paths:
           application/json:
             schema: { type: object, additionalProperties: true }
       responses: { '200': { $ref: '#/components/responses/Success' } }
+  /analytics/csp-report:
+    post:
+      security: []
+      tags: [Administration]
+      operationId: receiveCSPReport
+      description: 방문 추적 스니펫이 켜진 화면의 정책이 report-uri로 지정하는 경로. 브라우저가 자격 증명 없이 보내므로 인증하지 않으며, 차단된 출처·지시어만 메모리에 최대 100건 기억한다.
+      requestBody:
+        content:
+          application/csp-report:
+            schema:
+              type: object
+              properties:
+                csp-report:
+                  type: object
+                  properties:
+                    blocked-uri: { type: string }
+                    effective-directive: { type: string }
+                    violated-directive: { type: string }
+                    document-uri: { type: string }
+      responses: { '204': { description: 접수 완료(항상) } }
+  /analytics/violations:
+    get:
+      tags: [Administration]
+      operationId: listAnalyticsViolations
+      description: 정책이 막은 출처 목록. allowed=true는 현재 설정이 이미 허용하는 출처다. settings:read 권한이 필요하다.
+      responses: { '200': { $ref: '#/components/responses/Success' } }
+    delete:
+      tags: [Administration]
+      operationId: clearAnalyticsViolations
+      description: 기록을 비운다. settings:write 권한이 필요하다.
+      responses: { '204': { description: 삭제 완료 } }
   /keys:
     get:
       operationId: listPersonalKeys

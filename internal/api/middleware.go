@@ -45,7 +45,25 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 //   - form-action: 주입된 <form>이 세션 쿠키가 붙는 요청을 외부로 보내지 못하게 차단
 //
 // OIDC 로그인은 302 redirect라 form-action의 영향을 받지 않는다.
+//
+// 방문 추적 스니펫이 켜진 화면은 serveSPA가 요청마다 nonce를 붙인 정책으로
+// 이 값을 덮어쓴다(analytics_handlers.go의 pagePolicy). 'unsafe-inline'은
+// 어디에도 넣지 않는다 — 한 번 풀면 추적을 끈 뒤에도 느슨한 채 남는다.
 const contentSecurityPolicy = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+
+// apiSecurityPolicy는 화면이 아닌 응답(API·MCP·probe·프록시)의 정책이다.
+// JSON에는 실행할 것이 없으므로 아무것도 허용하지 않는다.
+const apiSecurityPolicy = "default-src 'none'; frame-ancestors 'none'"
+
+// isPagePath는 SPA 셸이나 그 정적 파일을 돌려주는 경로인지 가른다.
+func isPagePath(path string) bool {
+	for _, prefix := range []string{"/api/", "/mcp", "/healthz", "/readyz", "/momento/"} {
+		if strings.HasPrefix(path, prefix) {
+			return false
+		}
+	}
+	return true
+}
 
 // hstsMaxAge는 1년이다. jupiq는 사내 도메인의 한 호스트로 배포되는 경우가 많아
 // includeSubDomains·preload는 붙이지 않는다. 같은 도메인의 다른 서비스까지
@@ -57,7 +75,11 @@ func setSecurityHeaders(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("Referrer-Policy", "same-origin")
 	w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-	w.Header().Set("Content-Security-Policy", contentSecurityPolicy)
+	if isPagePath(r.URL.Path) {
+		w.Header().Set("Content-Security-Policy", contentSecurityPolicy)
+	} else {
+		w.Header().Set("Content-Security-Policy", apiSecurityPolicy)
+	}
 	// HTTP로 접근하는 폐쇄망 배포에 HSTS를 남기면 이후 평문 접속이 영구히
 	// 막히므로, TLS로 도달한 요청에만 붙인다.
 	if auth.IsSecureRequest(r) {
