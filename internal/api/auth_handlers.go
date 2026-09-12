@@ -158,12 +158,16 @@ func (s *Server) oidcConfig(w http.ResponseWriter, r *http.Request) {
 		handleStoreError(w, r, err)
 		return
 	}
-	data(w, http.StatusOK, map[string]any{"enabled": cfg.Enabled && secretConfigured, "issuer_url": cfg.IssuerURL, "client_id": cfg.ClientID, "secret_configured": secretConfigured})
+	enabled := cfg.Enabled && secretConfigured
+	// auto_login is published so the browser knows whether to try a silent
+	// sign-in before it renders the login screen.
+	data(w, http.StatusOK, map[string]any{"enabled": enabled, "auto_login": enabled && cfg.AutoLogin, "issuer_url": cfg.IssuerURL, "client_id": cfg.ClientID, "secret_configured": secretConfigured})
 }
 
 func (s *Server) oidcLogin(w http.ResponseWriter, r *http.Request) {
 	redirect := absoluteURL(r, "/api/v1/auth/oidc/callback")
-	authURL, stateCookie, expires, err := s.Auth.OIDCLogin(r.Context(), redirect, r.URL.Query().Get("return_to"))
+	silent := r.URL.Query().Get("prompt") == "none"
+	authURL, stateCookie, expires, err := s.Auth.OIDCLogin(r.Context(), redirect, r.URL.Query().Get("return_to"), silent)
 	if err != nil {
 		apiError(w, r, http.StatusServiceUnavailable, "oidc_unavailable", err.Error())
 		return
@@ -173,6 +177,10 @@ func (s *Server) oidcLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) oidcCallback(w http.ResponseWriter, r *http.Request) {
+	if providerError := r.URL.Query().Get("error"); providerError != "" {
+		s.oidcRefused(w, r, providerError)
+		return
+	}
 	stateCookie, err := r.Cookie(auth.OIDCStateCookie)
 	if err != nil || r.URL.Query().Get("code") == "" || r.URL.Query().Get("state") == "" {
 		apiError(w, r, http.StatusBadRequest, "oidc_callback_invalid", "OIDC callback 정보가 없습니다")
@@ -193,6 +201,24 @@ func (s *Server) oidcCallback(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{Name: auth.OIDCStateCookie, Value: "", Path: "/api/v1/auth/oidc/callback", MaxAge: -1, HttpOnly: true, Secure: auth.IsSecureRequest(r), SameSite: http.SameSiteLaxMode})
 	_ = s.Store.RecordAudit(r.Context(), store.AuditEvent{ActorUserID: &user.ID, ActorUsername: user.Username, Action: "auth.oidc", ResourceType: "session", ResourceID: p.JTI, Result: "success", IPAddress: clientIP(r), UserAgent: r.UserAgent(), RequestID: requestID(r)})
 	http.Redirect(w, r, auth.SanitizeReturnTo(returnTo), http.StatusFound)
+}
+
+// oidcRefused handles a callback where the provider answered with an error
+// instead of a code. A silent (prompt=none) attempt gets login_required
+// whenever the provider holds no session — an ordinary answer, not a failure —
+// so it is neither audited nor logged; the browser is sent to the login page
+// with a marker that stops it from trying again and looping.
+func (s *Server) oidcRefused(w http.ResponseWriter, r *http.Request, providerError string) {
+	var stateCookie string
+	if cookie, err := r.Cookie(auth.OIDCStateCookie); err == nil {
+		stateCookie = cookie.Value
+	}
+	silent, returnTo := s.Auth.OIDCRefusal(stateCookie, r.URL.Query().Get("state"))
+	if !silent {
+		s.Logger.Warn("OIDC provider returned an error", "error", providerError, "request_id", requestID(r))
+	}
+	http.SetCookie(w, &http.Cookie{Name: auth.OIDCStateCookie, Value: "", Path: "/api/v1/auth/oidc/callback", MaxAge: -1, HttpOnly: true, Secure: auth.IsSecureRequest(r), SameSite: http.SameSiteLaxMode})
+	http.Redirect(w, r, auth.LoginPathAfterRefusal(silent, returnTo), http.StatusFound)
 }
 
 func absoluteURL(r *http.Request, path string) string {

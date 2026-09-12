@@ -99,11 +99,17 @@ paths:
       description: >-
         return_to는 암호화된 OIDC state에 담겨 callback 이후 이동할 화면으로 사용된다.
         같은 origin의 절대 경로만 허용하며 그 외의 값은 "/"로 대체한다.
+        prompt=none은 화면을 그리지 않는 조용한 시도(silent SSO)를 요청한다. auth.oidc.auto_login이
+        꺼져 있으면 서버가 조용히 평범한 로그인으로 바꾸므로 주소만으로 흐름을 바꿀 수 없다.
       parameters:
         - name: return_to
           in: query
           required: false
           schema: { type: string, maxLength: 512, pattern: '^/(?!/).*' }
+        - name: prompt
+          in: query
+          required: false
+          schema: { type: string, enum: [none] }
       responses:
         '302': { description: Keycloak authorization endpoint로 이동 }
   /auth/oidc/callback:
@@ -114,11 +120,15 @@ paths:
       description: >-
         Keycloak이 돌려보내는 redirect 경로다. state 쿠키와 code·state 질의값이 모두 일치해야 하며
         성공하면 세션 쿠키를 발급하고 state에 담긴 return_to 화면으로 이동한다.
+        제공자가 code 대신 error를 돌려보내면(prompt=none 시도에 세션이 없을 때의 login_required 등)
+        /login?sso=none(조용한 시도) 또는 /login?sso=error(그 외)로 보내며, 브라우저는 이 표시가 있는
+        주소에서 조용한 시도를 다시 하지 않는다. 원래 가려던 return_to는 같은 질의에 함께 담긴다.
       parameters:
-        - { name: code, in: query, required: true, schema: { type: string } }
-        - { name: state, in: query, required: true, schema: { type: string } }
+        - { name: code, in: query, required: false, schema: { type: string } }
+        - { name: state, in: query, required: false, schema: { type: string } }
+        - { name: error, in: query, required: false, schema: { type: string } }
       responses:
-        '302': { description: 세션 쿠키 발급 후 return_to 화면으로 이동 }
+        '302': { description: 세션 쿠키 발급 후 return_to 화면으로 이동, 제공자 오류면 /login?sso=… 으로 이동 }
         '400': { $ref: '#/components/responses/Error' }
         '401': { $ref: '#/components/responses/Error' }
   /features:
