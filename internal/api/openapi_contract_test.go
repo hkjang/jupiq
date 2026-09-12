@@ -24,6 +24,8 @@ var undocumentedRoutes = map[string]string{
 	"POST /api/v1/approvals":        "승인 요청은 대상 작업 API가 만들므로 항상 405",
 	"PUT /api/v1/approvals/{id}":    "승인 상태는 review·approve·reject로만 바꾸므로 항상 405",
 	"DELETE /api/v1/approvals/{id}": "감사 추적을 위해 삭제를 막으므로 항상 405",
+	"GET /momento/":                 "서버 접두사 밖의 같은 오리진 Momento 수집기 프록시(추적기 로더 GET /momento/tracker.js만 통과)",
+	"POST /momento/":                "서버 접두사 밖의 같은 오리진 Momento 수집기 프록시(수집 POST /momento/collect/*만 통과)",
 }
 
 type recordingRouter struct{ patterns []string }
@@ -44,6 +46,7 @@ func registeredRoutes(t *testing.T) map[string]bool {
 	s.registerResources(rec)
 	s.registerAI(rec)
 	s.registerMCP(rec)
+	s.registerAnalytics(rec)
 	rec.HandleFunc("GET /", s.serveSPA)
 	routes := map[string]bool{}
 	for _, pattern := range rec.patterns {

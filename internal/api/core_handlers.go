@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hkjang/jupiq/internal/analytics"
 	"github.com/hkjang/jupiq/internal/integration"
 	"github.com/hkjang/jupiq/internal/store"
 )
@@ -667,7 +668,7 @@ func applySecureIntegrationDefaults(values map[string]any) {
 var allowedSettingKeys = map[string]bool{
 	"system": true, "workflow": true, "auth.oidc": true, "ai": true, "prometheus": true,
 	"kubernetes": true, "notifications": true, "features": true, "llm_usage": true,
-	"security": true,
+	"security": true, analytics.SettingKey: true,
 }
 
 var allowedSettingFields = map[string]map[string]bool{
@@ -681,6 +682,7 @@ var allowedSettingFields = map[string]map[string]bool{
 	"features":      {"gpu_monitoring": true, "llm_usage_monitoring": true},
 	"llm_usage":     {"source": true, "pod_username_regex": true, "sample_pod": true, "path_matcher": true, "label_mappings": true, "promql": true, "input_cost_per_million": true, "output_cost_per_million": true, "stale_seconds": true, "retention_days": true},
 	"security":      {"key_rotation_days": true, "key_max_lifetime_days": true, "key_permissions": true},
+	"analytics":     {"enabled": true, "provider": true, "momento_url": true, "momento_site_id": true, "momento_proxy": true, "momento_verify_tls": true, "measurement_id": true, "matomo_url": true, "matomo_site_id": true, "custom_snippet": true, "allowed_hosts": true, "include_admin": true, "placement": true},
 }
 
 func validateSettingsUpdate(values map[string]any, secrets map[string]string) error {
@@ -718,6 +720,7 @@ func validateSettingSection(key string, object map[string]any) error {
 		"kubernetes":    {"base_url", "namespace", "label_selector", "pod_username_regex"},
 		"notifications": {"base_url"},
 		"llm_usage":     {"source", "pod_username_regex", "sample_pod", "path_matcher"},
+		"analytics":     {"provider", "momento_url", "momento_site_id", "measurement_id", "matomo_url", "matomo_site_id", "custom_snippet", "allowed_hosts", "placement"},
 	}
 	for _, field := range stringFields[key] {
 		if raw, exists := object[field]; exists {
@@ -738,6 +741,7 @@ func validateSettingSection(key string, object map[string]any) error {
 		"prometheus":    {"enabled", "verify_tls"},
 		"kubernetes":    {"enabled", "verify_tls"},
 		"notifications": {"webhook_enabled"},
+		"analytics":     {"enabled", "momento_proxy", "momento_verify_tls", "include_admin"},
 	}
 	for _, field := range boolFields[key] {
 		if value, exists := object[field]; exists {
@@ -772,7 +776,7 @@ func validateSettingSection(key string, object map[string]any) error {
 			}
 		}
 	}
-	for _, field := range []string{"base_url", "issuer_url", "redirect_url"} {
+	for _, field := range []string{"base_url", "issuer_url", "redirect_url", "momento_url", "matomo_url"} {
 		if raw, exists := object[field]; exists && strings.TrimSpace(fmt.Sprint(raw)) != "" {
 			value, ok := raw.(string)
 			if !ok {
@@ -801,6 +805,12 @@ func validateSettingSection(key string, object map[string]any) error {
 			if blankString(object["base_url"]) {
 				return fmt.Errorf("%s 사용 시 base_url이 필요합니다", key)
 			}
+		}
+	}
+	if key == analytics.SettingKey {
+		// provider별 필수 항목과 스니펫 크기 상한은 analytics 패키지가 한곳에서 정한다.
+		if err := analytics.ReadConfig(object).Validate(); err != nil {
+			return err
 		}
 	}
 	if key == "ai" {

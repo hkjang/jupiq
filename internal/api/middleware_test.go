@@ -41,11 +41,25 @@ func TestMiddlewareSetsSecurityHeaders(t *testing.T) {
 			t.Fatalf("%s=%q want %q", name, got, value)
 		}
 	}
-	csp := rec.Header().Get("Content-Security-Policy")
+	// 화면이 아닌 응답은 실행할 것이 없으므로 아무것도 허용하지 않는다.
+	if csp := rec.Header().Get("Content-Security-Policy"); csp != "default-src 'none'; frame-ancestors 'none'" {
+		t.Fatalf("API Content-Security-Policy=%q", csp)
+	}
+	for _, path := range []string{"/mcp", "/healthz", "/readyz", "/momento/tracker.js"} {
+		if csp := serveMiddleware(t, httptest.NewRequest(http.MethodGet, path, nil), okHandler).Header().Get("Content-Security-Policy"); csp != apiSecurityPolicy {
+			t.Fatalf("%s: Content-Security-Policy=%q want the API policy", path, csp)
+		}
+	}
+
+	page := serveMiddleware(t, httptest.NewRequest(http.MethodGet, "/dashboard", nil), okHandler)
+	csp := page.Header().Get("Content-Security-Policy")
 	for _, directive := range []string{"default-src 'self'", "script-src 'self'", "object-src 'none'", "frame-ancestors 'none'", "base-uri 'self'", "form-action 'self'"} {
 		if !strings.Contains(csp, directive) {
-			t.Fatalf("Content-Security-Policy=%q is missing %q", csp, directive)
+			t.Fatalf("page Content-Security-Policy=%q is missing %q", csp, directive)
 		}
+	}
+	if strings.Contains(csp, "script-src 'self' 'unsafe-inline'") || strings.Contains(csp, "nonce-") {
+		t.Fatalf("page policy without tracking must stay strict and nonce-free: %q", csp)
 	}
 }
 
