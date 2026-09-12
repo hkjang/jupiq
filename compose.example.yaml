@@ -2,7 +2,7 @@ name: jupiq
 
 services:
   jupiq:
-    image: jupiq:v1.5.0
+    image: jupiq:v1.6.0
     pull_policy: never
     container_name: jupiq
     restart: unless-stopped
