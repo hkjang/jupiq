@@ -5,6 +5,9 @@ import type { OidcConfig } from '../types'
 const ATTEMPTED_KEY = 'jupiq.sso.silentAttempted'
 const SIGNED_OUT_KEY = 'jupiq.sso.signedOut'
 
+// Values the server puts in that parameter: none (silent attempt found no
+// provider session), error (the provider declined for another reason) and
+// limited (jupiq refused to start because the address exceeded its rate limit).
 export const SSO_MARKER_PARAM = 'sso'
 
 // Routes where a silent attempt must never start. The login page is the
@@ -64,7 +67,7 @@ export function shouldAttemptSilentSso(oidc: OidcConfig, pathname: string, searc
   if (!oidc.enabled || !oidc.auto_login) return false
   if (isSilentSsoExcludedPath(pathname)) return false
   const marker = new URLSearchParams(search).get(SSO_MARKER_PARAM)
-  if (marker === 'none' || marker === 'error') return false
+  if (marker === 'none' || marker === 'error' || marker === 'limited') return false
   if (readFlag(SIGNED_OUT_KEY)) return false
   if (readFlag(ATTEMPTED_KEY)) return false
   return true

@@ -49,3 +49,22 @@ func TestLoginLimiterBlocksUsernameSprayByIP(t *testing.T) {
 		t.Fatal("IP-wide username spray was not blocked")
 	}
 }
+
+func TestLoginLimiterSuccessKeepsIPWindow(t *testing.T) {
+	limiter := newLoginLimiter()
+	for i := 0; i < loginIPLimit; i++ {
+		limiter.failed("192.0.2.10", fmt.Sprintf("spray-%d", i))
+	}
+	// A valid login for one account must not lift the address-wide block:
+	// the sprayer would otherwise reset its budget with a single real account.
+	limiter.succeeded("192.0.2.10", "spray-0")
+	if limiter.allow("192.0.2.10", "spray-0") {
+		t.Fatal("success cleared the IP-wide window")
+	}
+	if limiter.allow("192.0.2.10", "victim") {
+		t.Fatal("success let the address keep spraying other accounts")
+	}
+	if !limiter.allow("192.0.2.11", "spray-0") {
+		t.Fatal("account window survived a successful login")
+	}
+}

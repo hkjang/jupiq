@@ -20,6 +20,8 @@ type Server struct {
 	Auth         *auth.Service
 	Logger       *slog.Logger
 	loginLimiter *loginLimiter
+	// oidcStartLimiter는 익명으로 부를 수 있는 OIDC 로그인 시작을 IP별로 제한한다.
+	oidcStartLimiter *requestLimiter
 	// violations는 방문 추적 스니펫이 켜진 동안 브라우저가 신고한 CSP 차단 출처다.
 	violations *analytics.Recorder
 	// proxyTransport가 있으면 Momento 프록시가 그것만 쓴다(테스트용). 없으면
@@ -33,7 +35,7 @@ type Server struct {
 }
 
 func New(s *store.Store, authService *auth.Service, logger *slog.Logger) *Server {
-	return &Server{Store: s, Auth: authService, Logger: logger, loginLimiter: newLoginLimiter(), violations: analytics.NewRecorder()}
+	return &Server{Store: s, Auth: authService, Logger: logger, loginLimiter: newLoginLimiter(), oidcStartLimiter: newRequestLimiter(oidcStartWindow, oidcStartIPLimit), violations: analytics.NewRecorder()}
 }
 
 // router is the subset of *http.ServeMux the register 함수들이 사용하는 부분이다.

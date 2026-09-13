@@ -39,6 +39,7 @@ describe('silent SSO rules', () => {
   it('콜백이 남긴 주소 표시가 있으면 저장소가 비어 있어도 다시 시도하지 않는다', () => {
     expect(shouldAttemptSilentSso(enabled, '/dashboard', '?sso=none')).toBe(false)
     expect(shouldAttemptSilentSso(enabled, '/dashboard', '?return_to=%2Fhubs&sso=error')).toBe(false)
+    expect(shouldAttemptSilentSso(enabled, '/dashboard', '?sso=limited')).toBe(false)
     expect(shouldAttemptSilentSso(enabled, '/dashboard', '?sso=other')).toBe(true)
   })
 

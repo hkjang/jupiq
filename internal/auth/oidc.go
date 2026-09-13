@@ -186,18 +186,39 @@ func (s *Service) OIDCRefusal(stateCookie, state string) (silent bool, returnTo 
 	return saved.Silent, SanitizeReturnTo(saved.ReturnTo)
 }
 
+// SSO markers the login page reads from its address. The browser stops
+// retrying a silent attempt when any of them is present, so the marker works
+// even when its sessionStorage was cleared meanwhile.
+const (
+	// SSOMarkerNone is a silent attempt that found no provider session — the
+	// ordinary outcome of prompt=none, so the login page shows no notice.
+	SSOMarkerNone = "none"
+	// SSOMarkerError is any other provider error on the callback.
+	SSOMarkerError = "error"
+	// SSOMarkerLimited means jupiq itself refused to start the login because the
+	// caller's address exceeded the per-IP limit; the provider was never asked.
+	SSOMarkerLimited = "limited"
+)
+
 // LoginPathAfterRefusal is where the browser lands after the provider declined
-// to answer. sso=none marks a silent attempt that found no session — the
-// ordinary outcome of prompt=none — and sso=error any other provider error.
-// The browser stops retrying when either marker is present in the address, so
-// the marker survives even when its sessionStorage was cleared meanwhile.
+// to answer: sso=none for a silent attempt, sso=error for anything else.
 func LoginPathAfterRefusal(silent bool, returnTo string) string {
-	values := url.Values{}
 	if silent {
-		values.Set("sso", "none")
-	} else {
-		values.Set("sso", "error")
+		return loginPathWithMarker(SSOMarkerNone, returnTo)
 	}
+	return loginPathWithMarker(SSOMarkerError, returnTo)
+}
+
+// LoginPathRateLimited is where a login start that hit the per-IP limit is sent
+// instead of the provider. The deep link travels along so a later manual
+// sign-in still lands where the visitor wanted to go.
+func LoginPathRateLimited(returnTo string) string {
+	return loginPathWithMarker(SSOMarkerLimited, returnTo)
+}
+
+func loginPathWithMarker(marker, returnTo string) string {
+	values := url.Values{}
+	values.Set("sso", marker)
 	if returnTo = SanitizeReturnTo(returnTo); returnTo != DefaultReturnTo {
 		values.Set("return_to", returnTo)
 	}

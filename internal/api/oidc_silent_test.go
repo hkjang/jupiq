@@ -35,7 +35,7 @@ func newOIDCTestServer(t *testing.T) *Server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &Server{Auth: auth.NewService(nil, cipher), Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	return &Server{Auth: auth.NewService(nil, cipher), Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), oidcStartLimiter: newRequestLimiter(oidcStartWindow, oidcStartIPLimit)}
 }
 
 func callbackWithProviderError(t *testing.T, s *Server, query, cookie string) *httptest.ResponseRecorder {
@@ -122,5 +122,29 @@ func TestValidateSettingsAcceptsOIDCAutoLoginAsBoolean(t *testing.T) {
 	}
 	if err := validateSettingsUpdate(map[string]any{"auth.oidc": withAutoLogin("yes")}, nil); err == nil || !strings.Contains(err.Error(), "auto_login") {
 		t.Fatalf("non-boolean auto_login was accepted: %v", err)
+	}
+}
+
+func TestOIDCLoginOverIPLimitLandsOnLoginPageWithoutAskingProvider(t *testing.T) {
+	s := newOIDCTestServer(t)
+	for i := 0; i < oidcStartIPLimit; i++ {
+		s.oidcStartLimiter.allow("192.0.2.7")
+	}
+	// The server has no store: reaching OIDCLogin would panic, so a 302 proves
+	// the limiter answered before any settings lookup or Discovery request.
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/oidc/login?prompt=none&return_to=%2Fusers%2Fuser01", nil)
+	req.RemoteAddr = "192.0.2.7:51234"
+	rec := httptest.NewRecorder()
+	s.oidcLogin(rec, req)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status=%d want 302: %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Location"); got != "/login?return_to=%2Fusers%2Fuser01&sso=limited" {
+		t.Fatalf("Location=%q", got)
+	}
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == auth.OIDCStateCookie {
+			t.Fatal("a refused start must not issue a state cookie")
+		}
 	}
 }

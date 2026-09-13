@@ -101,6 +101,9 @@ paths:
         같은 origin의 절대 경로만 허용하며 그 외의 값은 "/"로 대체한다.
         prompt=none은 화면을 그리지 않는 조용한 시도(silent SSO)를 요청한다. auth.oidc.auto_login이
         꺼져 있으면 서버가 조용히 평범한 로그인으로 바꾸므로 주소만으로 흐름을 바꿀 수 없다.
+        호출마다 제공자 Discovery 요청이 나가므로 IP별로 분당 120회까지만 받으며, 넘으면 제공자를
+        부르지 않고 /login?sso=limited(return_to 동반)로 보낸다. 브라우저 이동으로만 쓰는 경로라
+        429 대신 로그인 화면으로 보낸다.
       parameters:
         - name: return_to
           in: query
@@ -111,7 +114,7 @@ paths:
           required: false
           schema: { type: string, enum: [none] }
       responses:
-        '302': { description: Keycloak authorization endpoint로 이동 }
+        '302': { description: Keycloak authorization endpoint로 이동. IP별 상한을 넘으면 /login?sso=limited로 이동 }
   /auth/oidc/callback:
     get:
       security: []
