@@ -86,6 +86,9 @@ func (l *loginLimiter) failed(ip, username string) {
 	}
 }
 
+// succeeded clears the pair and account windows but deliberately keeps the
+// ip window: one valid login from an address that is spraying usernames must
+// not hand it a fresh budget of failures against every other account.
 func (l *loginLimiter) succeeded(ip, username string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
