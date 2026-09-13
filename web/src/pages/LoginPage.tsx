@@ -19,8 +19,11 @@ export function LoginPage() {
   const query = new URLSearchParams(location.search)
   const from = (location.state as { from?: string } | null)?.from || safeReturnTo(query.get('return_to') || '/')
   // sso=none is the ordinary "no provider session" answer and needs no notice;
-  // sso=error means the provider declined for another reason.
-  const ssoError = query.get(SSO_MARKER_PARAM) === 'error'
+  // sso=error means the provider declined for another reason and sso=limited
+  // that jupiq refused to start the login because this address sent too many.
+  const ssoMarker = query.get(SSO_MARKER_PARAM)
+  const ssoError = ssoMarker === 'error'
+  const ssoLimited = ssoMarker === 'limited'
 
   if (!loading && user) return <Navigate to={from} replace />
 
@@ -67,6 +70,7 @@ export function LoginPage() {
           </Space>
           {error && <Alert type="error" showIcon message="로그인 실패" description={error} closable onClose={() => setError('')} />}
           {ssoError && !error && <Alert type="warning" showIcon message="SSO 로그인이 완료되지 않았습니다" description="인증 서버가 로그인을 거절했습니다. 다시 시도하거나 비상 관리자 계정으로 로그인하세요." />}
+          {ssoLimited && !error && <Alert type="warning" showIcon message="SSO 로그인 요청이 너무 많습니다" description="같은 주소에서 짧은 시간에 SSO 로그인 시작 요청이 너무 많아 잠시 막았습니다. 1분 뒤 다시 시도하거나 비상 관리자 계정으로 로그인하세요." />}
           {oidc.enabled && (
             <>
               <Button size="large" block type="primary" icon={<SafetyCertificateOutlined />} onClick={startOidc}>

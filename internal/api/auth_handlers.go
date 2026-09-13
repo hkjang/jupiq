@@ -165,9 +165,17 @@ func (s *Server) oidcConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) oidcLogin(w http.ResponseWriter, r *http.Request) {
+	returnTo := r.URL.Query().Get("return_to")
+	if !s.oidcStartLimiter.allow(clientIP(r)) {
+		// Only a top-level browser navigation ever reaches this route, so a JSON
+		// 429 would be shown as raw text. The login page explains and offers the
+		// local account; its marker also keeps a silent attempt from retrying.
+		http.Redirect(w, r, auth.LoginPathRateLimited(returnTo), http.StatusFound)
+		return
+	}
 	redirect := absoluteURL(r, "/api/v1/auth/oidc/callback")
 	silent := r.URL.Query().Get("prompt") == "none"
-	authURL, stateCookie, expires, err := s.Auth.OIDCLogin(r.Context(), redirect, r.URL.Query().Get("return_to"), silent)
+	authURL, stateCookie, expires, err := s.Auth.OIDCLogin(r.Context(), redirect, returnTo, silent)
 	if err != nil {
 		apiError(w, r, http.StatusServiceUnavailable, "oidc_unavailable", err.Error())
 		return

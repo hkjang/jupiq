@@ -117,3 +117,15 @@ func TestLoginPathAfterRefusalMarksOutcomeAndKeepsDeepLink(t *testing.T) {
 		}
 	}
 }
+
+func TestLoginPathRateLimitedMarksLimitAndKeepsDeepLink(t *testing.T) {
+	for _, tc := range []struct{ returnTo, want string }{
+		{"/", "/login?sso=limited"},
+		{"/users/user01?tab=servers", "/login?return_to=%2Fusers%2Fuser01%3Ftab%3Dservers&sso=limited"},
+		{"//evil.example", "/login?sso=limited"},
+	} {
+		if got := LoginPathRateLimited(tc.returnTo); got != tc.want {
+			t.Fatalf("LoginPathRateLimited(%q) = %q, want %q", tc.returnTo, got, tc.want)
+		}
+	}
+}

@@ -350,7 +350,9 @@ API로도 같은 일을 할 수 있습니다: `GET /api/v1/analytics/violations`
    난 것처럼 보이기 때문입니다. 다음에 세션이 생기면 억제가 풀립니다.
 3. **거절은 주소에 남습니다.** 콜백이 `login_required`를 받으면 `/login?sso=none`으로 보내며, 브라우저
    저장소가 지워졌더라도 이 표시가 있으면 다시 시도하지 않습니다. 그 외 제공자 오류는
-   `/login?sso=error`로 보내고 로그인 화면에 안내를 띄웁니다.
+   `/login?sso=error`로 보내고 로그인 화면에 안내를 띄웁니다. 같은 주소에서 시작 요청이 분당 120회를
+   넘어 jupiq가 제공자를 부르지 않고 돌려보낸 경우는 `/login?sso=limited`이며, 이 표시 역시 재시도를
+   막습니다(7.3절).
 
 브라우저 저장소를 읽을 수 없는 환경(사생활 보호 모드 등)에서는 "이미 시도했다"로 간주해 시도하지
 않습니다. 숨은 iframe이 아니라 최상위 페이지 이동을 쓰므로 서드파티 쿠키가 막힌 브라우저에서도
@@ -515,6 +517,7 @@ GPU·LLM 화면 자체가 없다면 장애가 아니라 `선택 기능` 스위�
 | Keycloak에 로그인했는데 jupiq는 로그인 화면이 나옴 | `외부 연동 → Keycloak OIDC`의 `자동 로그인(Silent SSO)`이 꺼져 있음(기본값). 켜져 있다면 그 탭에서 이미 한 번 시도했거나 직전에 로그아웃한 것이므로 새 탭에서 열어 확인 |
 | 로그인 화면 주소에 `?sso=none`이 붙음 | 정상. 조용한 시도가 "세션 없음"을 받았다는 표시이며 그대로 로그인하면 됨 |
 | 로그인 화면에 `SSO 로그인이 완료되지 않았습니다` 안내 | Keycloak이 `login_required` 외의 오류(예: `access_denied`, `interaction_required`)를 돌려줌. 컨테이너 로그의 `OIDC provider returned an error` 항목에서 오류 코드 확인 |
+| 로그인 화면에 `SSO 로그인 요청이 너무 많습니다` 안내 | 같은 IP에서 1분 안에 `GET /api/v1/auth/oidc/login`이 120회를 넘음. 리버스 프록시 뒤라면 모든 사용자가 프록시 주소 하나로 합산되므로, 배포 직후 동시 접속이나 반복 호출하는 클라이언트가 있는지 확인. 1분 뒤 자동 해제 |
 | 모든 관리자가 잠김 | Bootstrap 계정으로 로그인. 마지막 최고 관리자 할당은 서비스가 보호하므로 완전히 잠기지는 않습니다 |
 
 ### 6.5 서버 제어가 실행되지 않는다
@@ -550,7 +553,8 @@ GPU·LLM 화면 자체가 없다면 장애가 아니라 `선택 기능` 스위�
 | 응답 헤더 | `Content-Security-Policy`(화면은 `script-src 'self'`, 방문 추적이 켜진 화면만 요청별 nonce 추가, API·MCP·probe는 `default-src 'none'`; frame-ancestors·base-uri·form-action·object-src 포함), `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`, TLS 요청에는 HSTS |
 | 상태 변경 요청 | 동일 출처가 아니면 거부(Origin 호스트·스킴과 `Sec-Fetch-Site` 확인) |
 | 세션 | HttpOnly `jupiq_session` 쿠키, SameSite=Lax, 토큰 8시간 |
-| 로그인 시도 | 10분 창, 조합 8회 / 계정 16회 / IP 40회 |
+| 로그인 시도 | 10분 창, 조합 8회 / 계정 16회 / IP 40회 (실패만 셈) |
+| OIDC 로그인 시작 | `GET /api/v1/auth/oidc/login`은 호출마다 Keycloak Discovery 요청이 나가므로 IP별 분당 120회. 넘으면 제공자를 부르지 않고 `/login?sso=limited`로 보내 로그인 화면에 안내를 띄운다. IP는 jupiq에 직접 닿는 주소라 리버스 프록시 뒤에서는 프록시 주소 하나로 합산된다 |
 | 요청 본문 | 2 MiB 초과 시 거부 |
 | 비밀값 | Hub 토큰·OIDC client secret·AI 키는 암호화 저장, 화면·API에서 평문 재표시 없음 |
 | API 키 | 해시로만 저장, 발급·회전 직후 1회 표시 |
