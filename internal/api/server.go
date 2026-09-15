@@ -12,13 +12,17 @@ import (
 
 	"github.com/hkjang/jupiq/internal/analytics"
 	"github.com/hkjang/jupiq/internal/auth"
+	"github.com/hkjang/jupiq/internal/mail"
 	"github.com/hkjang/jupiq/internal/store"
 )
 
 type Server struct {
-	Store        *store.Store
-	Auth         *auth.Service
-	Logger       *slog.Logger
+	Store  *store.Store
+	Auth   *auth.Service
+	Logger *slog.Logger
+	// Mail이 있으면 승인·Hub 상태 같은 이벤트를 사내 SMTP 릴레이로 알린다.
+	// 없으면(테스트) 알림은 조용히 생략된다.
+	Mail         *mail.Service
 	loginLimiter *loginLimiter
 	// oidcStartLimiter는 익명으로 부를 수 있는 OIDC 로그인 시작을 IP별로 제한한다.
 	oidcStartLimiter *requestLimiter
@@ -54,6 +58,7 @@ func (s *Server) Handler() http.Handler {
 	s.registerAI(mux)
 	s.registerMCP(mux)
 	s.registerAnalytics(mux)
+	s.registerMail(mux)
 	mux.HandleFunc("GET /", s.serveSPA)
 	return s.middleware(mux)
 }

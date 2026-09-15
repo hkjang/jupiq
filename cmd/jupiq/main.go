@@ -14,6 +14,7 @@ import (
 	"github.com/hkjang/jupiq/internal/auth"
 	"github.com/hkjang/jupiq/internal/collector"
 	"github.com/hkjang/jupiq/internal/config"
+	"github.com/hkjang/jupiq/internal/mail"
 	"github.com/hkjang/jupiq/internal/secure"
 	"github.com/hkjang/jupiq/internal/store"
 	"github.com/hkjang/jupiq/internal/version"
@@ -50,12 +51,17 @@ func main() {
 		os.Exit(1)
 	}
 	authService := auth.NewService(database, cipher)
-	handler := api.New(database, authService, logger).Handler()
+	mailer := mail.NewService(database, logger)
+	server := api.New(database, authService, logger)
+	server.Mail = mailer
+	handler := server.Handler()
 	httpServer := &http.Server{Addr: config.ListenAddress, Handler: handler, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 0, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 1 << 20}
 	collectorDone := make(chan struct{})
 	go func() {
 		defer close(collectorDone)
-		collector.New(database, logger).Run(rootCtx)
+		c := collector.New(database, logger)
+		c.Mail = mailer
+		c.Run(rootCtx)
 	}()
 	go func() {
 		logger.Info("jupiq started", "address", config.ListenAddress, "version", version.Version)
@@ -74,4 +80,6 @@ func main() {
 	// in-flight hub probes finish writing their health status before the
 	// deferred database.Close closes the pool underneath them.
 	<-collectorDone
+	// 배경 발송 중인 메일이 기록을 남길 시간을 준다.
+	mailer.Wait(5 * time.Second)
 }

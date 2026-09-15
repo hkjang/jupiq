@@ -33,6 +33,7 @@ var allowedSettingsSecretKeys = map[string]struct{}{
 	"kubernetes.token":   {},
 	"ai.api_key":         {},
 	"webhook.secret":     {},
+	"mail.password":      {},
 }
 
 // IsSettingsSecretKey is the single allowlist used by both the HTTP boundary
@@ -156,6 +157,7 @@ var settingsSecretBindings = []settingsSecretBinding{
 	{kind: "kubernetes", section: "kubernetes", secretKey: "kubernetes.token"},
 	{kind: "ai", section: "ai", secretKey: "ai.api_key"},
 	{kind: "webhook", section: "notifications", secretKey: "webhook.secret"},
+	{kind: "mail", section: "mail", secretKey: "mail.password"},
 }
 
 func validateStoredSecretBindings(ctx context.Context, tx pgx.Tx, values, submittedSecrets map[string][]byte) error {
@@ -198,8 +200,11 @@ func settingBool(value map[string]any, key string) bool {
 
 func storedIntegrationBindingMatches(kind string, candidate, saved map[string]any) bool {
 	targetKey := "base_url"
-	if kind == "oidc" {
+	switch kind {
+	case "oidc":
 		targetKey = "issuer_url"
+	case "mail":
+		targetKey = "smtp_host"
 	}
 	candidateTarget, _ := candidate[targetKey].(string)
 	savedTarget, _ := saved[targetKey].(string)
@@ -215,10 +220,15 @@ func storedIntegrationBindingMatches(kind string, candidate, saved map[string]an
 			return false
 		}
 	}
-	return storedIntegrationVerifyTLS(candidate) == storedIntegrationVerifyTLS(saved)
+	return storedIntegrationVerifyTLS(kind, candidate) == storedIntegrationVerifyTLS(kind, saved)
 }
 
-func storedIntegrationVerifyTLS(config map[string]any) bool {
+func storedIntegrationVerifyTLS(kind string, config map[string]any) bool {
+	if kind == "mail" {
+		// SMTP 설정은 표준 이름대로 skip_tls_verify를 쓴다(뜻이 반대).
+		skip, _ := config["skip_tls_verify"].(bool)
+		return !skip
+	}
 	if value, ok := config["verify_tls"].(bool); ok {
 		return value
 	}
