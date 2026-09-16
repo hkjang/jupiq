@@ -121,9 +121,10 @@ func (s *Service) OIDCLogin(ctx context.Context, redirectOverride, returnTo stri
 	if err != nil {
 		return "", "", time.Time{}, err
 	}
-	state, _ := secure.RandomToken(24)
-	nonce, _ := secure.RandomToken(24)
-	verifier, _ := secure.RandomToken(48)
+	state, nonce, verifier, err := oidcLoginTokens()
+	if err != nil {
+		return "", "", time.Time{}, err
+	}
 	expires := time.Now().UTC().Add(10 * time.Minute)
 	stateValue := oidcState{State: state, Nonce: nonce, CodeVerifier: verifier, ReturnTo: SanitizeReturnTo(returnTo), Silent: silent, ExpiresAt: expires}
 	encrypted, err := s.sealOIDCState(stateValue)
@@ -143,6 +144,22 @@ func (s *Service) OIDCLogin(ctx context.Context, redirectOverride, returnTo stri
 		options = append(options, oauth2.SetAuthURLParam("prompt", "none"))
 	}
 	return oauthConfig.AuthCodeURL(state, options...), encrypted, expires, nil
+}
+
+// oidcLoginTokens draws the state, nonce and PKCE verifier for one login
+// start. Entropy failure is not survivable here: a predictable state would
+// defeat the CSRF check, so the login is refused instead of continuing.
+func oidcLoginTokens() (state, nonce, verifier string, err error) {
+	if state, err = secure.RandomToken(24); err != nil {
+		return "", "", "", err
+	}
+	if nonce, err = secure.RandomToken(24); err != nil {
+		return "", "", "", err
+	}
+	if verifier, err = secure.RandomToken(48); err != nil {
+		return "", "", "", err
+	}
+	return state, nonce, verifier, nil
 }
 
 // SilentLoginAllowed decides whether a requested silent attempt may proceed.

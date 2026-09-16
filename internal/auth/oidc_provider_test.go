@@ -242,3 +242,13 @@ func TestOIDCProviderCacheNilFallsBackToDirectDiscovery(t *testing.T) {
 	}
 	cache.forget("http://127.0.0.1:9", true)
 }
+
+func TestOIDCLoginTokensAreDistinct(t *testing.T) {
+	state, nonce, verifier, err := oidcLoginTokens()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state == "" || nonce == "" || verifier == "" || state == nonce || nonce == verifier {
+		t.Fatalf("tokens must be non-empty and distinct: %q %q %q", state, nonce, verifier)
+	}
+}
