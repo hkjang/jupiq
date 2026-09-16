@@ -7,9 +7,9 @@ import (
 
 const (
 	// oidcStartWindow·oidcStartIPLimit는 OIDC 로그인 시작 요청의 IP별 상한이다.
-	// 이 경로는 누구나 부를 수 있고 부를 때마다 제공자의 Discovery 문서를 받아
-	// 오므로, 익명 요청 하나가 Keycloak으로 가는 요청 하나로 증폭된다. 자동
-	// 로그인(silent SSO)이 켜지면 탭 세션마다 한 번씩 정상적으로도 들어오므로
+	// 이 경로는 누구나 부를 수 있고, 제공자 Discovery 캐시(auth 패키지)가 비었거나
+	// 만료된 순간에는 Keycloak으로 가는 요청으로 이어지므로 익명 요청이 제공자
+	// 부하로 증폭되지 않게 막는다. 자동 로그인(silent SSO)이 켜지면 탭 세션마다 한 번씩 정상적으로도 들어오므로
 	// 사무실 NAT 뒤의 사용자 수를 넉넉히 넘는 값으로 둔다.
 	oidcStartWindow   = time.Minute
 	oidcStartIPLimit  = 120

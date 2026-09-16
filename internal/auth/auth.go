@@ -129,10 +129,13 @@ type Service struct {
 	Cipher *secure.Cipher
 	key    []byte
 	now    func() time.Time
+	// providers remembers discovered OIDC providers between the login start,
+	// its callback and later sign-ins; see oidcProviderCache.
+	providers *oidcProviderCache
 }
 
 func NewService(s *store.Store, cipher *secure.Cipher) *Service {
-	return &Service{Store: s, Cipher: cipher, key: cipher.Derive("jwt-signing-v1"), now: time.Now}
+	return &Service{Store: s, Cipher: cipher, key: cipher.Derive("jwt-signing-v1"), now: time.Now, providers: newOIDCProviderCache()}
 }
 
 func (s *Service) Login(ctx context.Context, username, password, ip, userAgent string) (Principal, string, time.Time, error) {

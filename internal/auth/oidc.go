@@ -117,8 +117,7 @@ func (s *Service) OIDCLogin(ctx context.Context, redirectOverride, returnTo stri
 	if _, err := url.ParseRequestURI(cfg.RedirectURL); err != nil {
 		return "", "", time.Time{}, errors.New("OIDC redirect URL이 올바르지 않습니다")
 	}
-	providerCtx := oidc.ClientContext(ctx, integration.SafeHTTPClient(cfg.VerifyTLS, 10*time.Second))
-	provider, err := oidc.NewProvider(providerCtx, cfg.IssuerURL)
+	provider, _, err := s.providers.get(ctx, cfg.IssuerURL, cfg.VerifyTLS)
 	if err != nil {
 		return "", "", time.Time{}, err
 	}
@@ -243,14 +242,18 @@ func (s *Service) OIDCCallback(ctx context.Context, code, state, stateCookie, re
 	if _, err := integration.ValidateEndpoint(cfg.IssuerURL); err != nil {
 		return store.User{}, DefaultReturnTo, err
 	}
-	providerCtx := oidc.ClientContext(ctx, integration.SafeHTTPClient(cfg.VerifyTLS, 10*time.Second))
-	provider, err := oidc.NewProvider(providerCtx, cfg.IssuerURL)
+	provider, client, err := s.providers.get(ctx, cfg.IssuerURL, cfg.VerifyTLS)
 	if err != nil {
 		return store.User{}, DefaultReturnTo, err
 	}
+	providerCtx := oidc.ClientContext(ctx, client)
 	oauthConfig := oauth2.Config{ClientID: cfg.ClientID, ClientSecret: secret, Endpoint: provider.Endpoint(), RedirectURL: cfg.RedirectURL, Scopes: cfg.Scopes}
 	token, err := oauthConfig.Exchange(providerCtx, code, oauth2.SetAuthURLParam("code_verifier", saved.CodeVerifier))
 	if err != nil {
+		// A rejected code is the common cause, but a provider that moved its
+		// token endpoint looks the same from here; dropping the cached
+		// discovery makes the next attempt re-read the document either way.
+		s.providers.forget(cfg.IssuerURL, cfg.VerifyTLS)
 		return store.User{}, DefaultReturnTo, errors.New("OIDC authorization code 교환에 실패했습니다")
 	}
 	rawIDToken, ok := token.Extra("id_token").(string)
