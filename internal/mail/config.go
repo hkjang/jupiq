@@ -142,6 +142,11 @@ func (c Config) Validate() error {
 	if seconds := int(c.Timeout / time.Second); seconds < 1 || seconds > maxTimeoutSeconds {
 		return fmt.Errorf("%w: mail.timeout_seconds는 1~%d 범위여야 합니다", ErrInvalid, maxTimeoutSeconds)
 	}
+	// security=none에 사용자 이름이 있으면 자격증명이 평문으로 망을 건너게 되므로
+	// 저장 시점에 막는다. auto는 릴레이가 STARTTLS를 알리면 되므로 세션이 정한다.
+	if c.Security == SecurityNone && strings.TrimSpace(c.Username) != "" && !loopbackHost(c.Host) {
+		return fmt.Errorf("%w: mail.security가 none이면 자격증명이 평문으로 나가므로 사용자 이름을 비우거나 starttls·tls를 쓰세요", ErrInvalid)
+	}
 	return nil
 }
 

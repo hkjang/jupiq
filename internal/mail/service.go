@@ -33,6 +33,26 @@ const (
 	StatusFailed = "failed"
 )
 
+const (
+	// deliveryAttempts와 retryDelay: 잠깐 연결을 거부하는 릴레이는 흔하고, 알림을
+	// 잃는 것이 몇 초 기다리는 것보다 나쁘다.
+	deliveryAttempts = 2
+	retryDelay       = 2 * time.Second
+	// maxConcurrentDeliveries는 동시에 열리는 릴레이 연결의 상한이다. 승인 요청
+	// 한 건이 승인자 수만큼 연결을 열지 않고, 응답 없는 릴레이 앞에서 요청 속도만큼
+	// 연결이 쌓이지 않는다. 넘치는 발송은 기록만 먼저 남고 자리가 나면 나간다.
+	maxConcurrentDeliveries = 4
+	// recordTimeout은 발송 결과를 저장소에 쓰는 시간이다. 발송 예산과 별개다.
+	recordTimeout = 10 * time.Second
+)
+
+// deliveryBudget은 배경 발송 한 건의 최악 시간이다. dial()은 접속(Dialer.Timeout)
+// 뒤 세션에 다시 Timeout의 deadline을 걸므로 시도 하나가 최대 2×Timeout이고,
+// 여기에 재시도 사이의 대기를 더한다.
+func deliveryBudget(config Config) time.Duration {
+	return time.Duration(deliveryAttempts)*2*config.Timeout + time.Duration(deliveryAttempts-1)*retryDelay
+}
+
 // Store는 서비스가 저장소에서 빌려 쓰는 네 가지다. 사용자 명부는 새로 만들지
 // 않는다 — 계정 id를 메일 주소로 바꾸는 조회 하나만 쓴다.
 type Store interface {
@@ -55,13 +75,15 @@ type Service struct {
 	now    func() time.Time
 	// inflight는 배경 발송을 센다. 종료 시 잠깐 기다려 기록이 끊기지 않게 한다.
 	inflight sync.WaitGroup
+	// slots는 동시 발송 세마포어다. 자리 하나가 릴레이 연결 하나다.
+	slots chan struct{}
 }
 
 func NewService(store Store, logger *slog.Logger) *Service {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Service{store: store, logger: logger, send: Deliver, now: func() time.Time { return time.Now().UTC() }}
+	return &Service{store: store, logger: logger, send: Deliver, now: func() time.Time { return time.Now().UTC() }, slots: make(chan struct{}, maxConcurrentDeliveries)}
 }
 
 // SetSender는 전송을 바꾼다(테스트용).
@@ -107,10 +129,14 @@ func (s *Service) Notify(ctx context.Context, notification Notification, actorUs
 	}
 	for _, address := range addresses {
 		delivery := Delivery{Event: notification.Event, Recipient: address, Subject: notification.Subject, Reference: notification.Reference, ActorUserID: actor, Status: StatusQueued}
+		// 기록은 여기서 바로 남긴다. 자리가 없어 발송이 기다리는 동안에도 관리
+		// 화면에는 queued로 보인다.
 		delivery.ID = s.record(ctx, delivery)
 		s.inflight.Add(1)
 		go func(delivery Delivery) {
 			defer s.inflight.Done()
+			s.slots <- struct{}{}
+			defer func() { <-s.slots }()
 			s.deliver(delivery, config, Message{To: address, Subject: notification.Subject, Body: body})
 		}(delivery)
 	}
@@ -135,10 +161,11 @@ func (s *Service) SendNow(ctx context.Context, notification Notification, actorU
 	delivery := Delivery{Event: notification.Event, Recipient: recipient, Subject: notification.Subject, Reference: notification.Reference, ActorUserID: actor, Status: StatusQueued}
 	delivery.ID = s.record(ctx, delivery)
 	delivery.Attempts = 1
-	sendCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), config.Timeout+5*time.Second)
+	// 시도 하나의 최악은 접속 대기 + 세션 대기 = 2×Timeout이다(deliveryBudget 참고).
+	sendCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*config.Timeout+5*time.Second)
 	defer cancel()
 	err = s.send(sendCtx, config, Message{To: recipient, Subject: notification.Subject, Body: notification.Render(config)})
-	s.complete(sendCtx, delivery, err)
+	s.complete(delivery, err)
 	return err
 }
 
@@ -156,28 +183,30 @@ func (s *Service) Wait(grace time.Duration) {
 	}
 }
 
-// deliver는 한 번 더 시도한다. 잠깐 연결을 거부하는 릴레이는 흔하고, 알림을
-// 잃는 것이 몇 초 기다리는 것보다 나쁘다.
+// deliver는 deliveryAttempts만큼 시도하고 결과를 기록한다. 예산은 최악의 경우
+// (매 시도가 접속·세션 대기를 다 쓰는 릴레이)까지 덮는다.
 func (s *Service) deliver(delivery Delivery, config Config, message Message) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*config.Timeout+15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), deliveryBudget(config))
 	defer cancel()
 	var err error
-	for attempt := 1; attempt <= 2; attempt++ {
+	for attempt := 1; attempt <= deliveryAttempts; attempt++ {
 		delivery.Attempts = attempt
 		if err = s.send(ctx, config, message); err == nil {
 			break
 		}
-		if attempt == 1 {
+		if attempt < deliveryAttempts {
 			select {
 			case <-ctx.Done():
-			case <-time.After(2 * time.Second):
+			case <-time.After(retryDelay):
 			}
 		}
 	}
-	s.complete(ctx, delivery, err)
+	s.complete(delivery, err)
 }
 
-func (s *Service) complete(ctx context.Context, delivery Delivery, cause error) {
+// complete는 결과를 기록한다. 발송 컨텍스트를 물려받지 않는다 — 예산을 끝까지
+// 쓴 발송의 기록이 같은 deadline으로 실패하면 행이 영원히 queued로 남는다.
+func (s *Service) complete(delivery Delivery, cause error) {
 	status, message := StatusSent, ""
 	if cause != nil {
 		status, message = StatusFailed, cause.Error()
@@ -188,6 +217,8 @@ func (s *Service) complete(ctx context.Context, delivery Delivery, cause error) 
 	if delivery.ID == 0 {
 		return
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), recordTimeout)
+	defer cancel()
 	if err := s.store.FinishMailDelivery(ctx, delivery.ID, status, delivery.Attempts, message); err != nil {
 		s.logger.Warn("mail delivery status was not recorded", "id", delivery.ID, "error", err)
 	}

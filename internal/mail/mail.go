@@ -113,15 +113,40 @@ func startSession(client *smtp.Client, config Config) error {
 	if !supported {
 		return fmt.Errorf("%w: 서버가 인증을 지원하지 않습니다. 사용자 이름을 비우고 쓰세요", ErrInvalid)
 	}
+	// 평문 인증 정책: 암호화되지 않은 연결로는 루프백 릴레이가 아닌 한 자격증명을
+	// 보내지 않는다. 표준 PlainAuth와 같은 규칙이며, 여기서 먼저 거르므로 PLAIN과
+	// LOGIN이 같은 이유로 같은 오류를 낸다 — 릴레이가 무엇을 광고하든 비밀번호가
+	// 망을 평문으로 건너지 않는다.
+	_, encrypted := client.TLSConnectionState()
+	if !credentialsAllowed(encrypted, config.Host) {
+		return fmt.Errorf("%w: 암호화되지 않은 연결로는 자격증명을 보내지 않습니다. mail.security를 starttls나 tls로 두거나 사용자 이름을 비우세요", ErrInvalid)
+	}
 	upper := strings.ToUpper(mechanisms)
 	switch {
 	case strings.Contains(upper, "PLAIN"):
 		return client.Auth(smtp.PlainAuth("", config.Username, config.Password, config.Host))
 	case strings.Contains(upper, "LOGIN"):
-		return client.Auth(loginAuth{username: config.Username, password: config.Password, host: config.Host})
+		return client.Auth(loginAuth{username: config.Username, password: config.Password})
 	default:
 		return client.Auth(smtp.CRAMMD5Auth(config.Username, config.Password))
 	}
+}
+
+// credentialsAllowed는 자격증명을 보내도 되는 연결인지 정한다: TLS 위이거나,
+// 릴레이가 같은 기계(루프백)여서 망을 건너지 않을 때.
+func credentialsAllowed(encrypted bool, host string) bool {
+	return encrypted || loopbackHost(host)
+}
+
+// loopbackHost는 표준 라이브러리 PlainAuth가 평문을 허용하는 이름과 정확히
+// 같다. 127.0.0.2 같은 다른 루프백 표기는 PlainAuth가 거부하므로 여기서도
+// 거부해 PLAIN과 LOGIN의 답이 갈리지 않게 한다.
+func loopbackHost(host string) bool {
+	switch strings.ToLower(strings.TrimSpace(host)) {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	return false
 }
 
 func (c Config) tlsConfig() *tls.Config {
@@ -139,11 +164,14 @@ func helloName(config Config) string {
 
 // loginAuth는 여러 사내 릴레이가 PLAIN 대신 쓰는 LOGIN 방식이다. 표준
 // 라이브러리는 PLAIN과 CRAM-MD5만 제공한다.
-type loginAuth struct{ username, password, host string }
+type loginAuth struct{ username, password string }
 
+// Start는 startSession의 정책을 한 번 더 지킨다. server.Name은 dial이 넘긴
+// config.Host 그대로라 a.host와 비교하는 것은 뜻이 없고(항상 같다), 실제로
+// 물어야 할 것은 TLS 위인지 아니면 루프백인지다 — 표준 PlainAuth와 같은 규칙.
 func (a loginAuth) Start(server *smtp.ServerInfo) (string, []byte, error) {
-	if !server.TLS && server.Name != a.host {
-		return "", nil, errors.New("LOGIN 인증은 신뢰할 수 있는 서버에서만 사용합니다")
+	if !credentialsAllowed(server.TLS, server.Name) {
+		return "", nil, errors.New("LOGIN 인증은 암호화된 연결이나 루프백 릴레이에서만 사용합니다")
 	}
 	return "LOGIN", nil, nil
 }
