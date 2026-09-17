@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -57,7 +58,7 @@ const apiSecurityPolicy = "default-src 'none'; frame-ancestors 'none'"
 
 // isPagePath는 SPA 셸이나 그 정적 파일을 돌려주는 경로인지 가른다.
 func isPagePath(path string) bool {
-	for _, prefix := range []string{"/api/", "/mcp", "/healthz", "/readyz", "/momento/"} {
+	for _, prefix := range []string{"/api/", "/mcp", "/healthz", "/readyz", "/momento/", "/.well-known/"} {
 		if strings.HasPrefix(path, prefix) {
 			return false
 		}
@@ -108,6 +109,10 @@ func (s *Server) require(permission string, next http.HandlerFunc) http.HandlerF
 	return func(w http.ResponseWriter, r *http.Request) {
 		p, err := s.Auth.AuthenticateRequest(r.Context(), r)
 		if err != nil {
+			if auth.IsMCPPath(r.URL.Path) {
+				s.mcpUnauthorized(w, r, err)
+				return
+			}
 			apiError(w, r, http.StatusUnauthorized, "unauthorized", err.Error())
 			return
 		}
@@ -117,6 +122,28 @@ func (s *Server) require(permission string, next http.HandlerFunc) http.HandlerF
 		}
 		next(w, withPrincipal(r, p))
 	}
+}
+
+// mcpUnauthorized는 /mcp의 401이다. MCP OAuth가 켜져 있으면 WWW-Authenticate에
+// 메타데이터 주소를 붙여 클라이언트가 스스로 로그인 흐름을 시작하게 한다 —
+// MCP 경로에서만이다. REST 401에 붙으면 브라우저와 다른 클라이언트가 엉뚱한
+// 곳으로 간다. 거부한 토큰의 원래 검증 오류(서명·발급자·만료·대상 중 무엇이
+// 실패했는지)는 여기서 로그에 남긴다. 클라이언트에는 조치 안내만 간다.
+func (s *Server) mcpUnauthorized(w http.ResponseWriter, r *http.Request, cause error) {
+	var refusal *auth.MCPOAuthRefusal
+	if errors.As(cause, &refusal) {
+		s.Logger.Warn("mcp oauth token refused", "reason", refusal.Cause, "request_id", requestID(r))
+	}
+	settings, err := s.Auth.MCPOAuthSettings(r.Context())
+	if err != nil {
+		s.Logger.Warn("mcp oauth settings unavailable", "error", err, "request_id", requestID(r))
+	} else if settings.Active() {
+		tokenPresented := strings.HasPrefix(strings.ToLower(strings.TrimSpace(r.Header.Get("Authorization"))), "bearer ")
+		w.Header().Set("WWW-Authenticate", settings.Challenge(r, tokenPresented))
+	} else if settings.Config.Enabled {
+		s.Logger.Warn("mcp oauth is enabled but inactive", "reason", settings.Inactive(), "request_id", requestID(r))
+	}
+	apiError(w, r, http.StatusUnauthorized, "unauthorized", cause.Error())
 }
 
 func isMutation(method string) bool {

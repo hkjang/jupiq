@@ -280,17 +280,19 @@ func (s *Service) OIDCCallback(ctx context.Context, code, state, stateCookie, re
 	display, _ := claims["name"].(string)
 	email, _ := claims["email"].(string)
 	department, _ := claims["department"].(string)
-	user, err := s.Store.UpsertOIDCUser(ctx, oidcExternalIdentity(cfg.IssuerURL, subject), username, display, email, department, cfg.AutoCreateUsers)
+	user, err := s.Store.UpsertOIDCUser(ctx, OIDCExternalIdentity(cfg.IssuerURL, subject), username, display, email, department, cfg.AutoCreateUsers)
 	if err != nil {
 		return store.User{}, DefaultReturnTo, err
 	}
 	return user, SanitizeReturnTo(saved.ReturnTo), nil
 }
 
-// oidcExternalIdentity binds an account to both issuer and subject.  A subject
+// OIDCExternalIdentity binds an account to both issuer and subject (the
+// users.external_subject value a web SSO login stores and an MCP access token
+// is matched against). A subject
 // value reused by a newly configured identity provider can therefore never
 // inherit the earlier provider's local roles.
-func oidcExternalIdentity(issuer, subject string) string {
+func OIDCExternalIdentity(issuer, subject string) string {
 	canonicalIssuer := strings.TrimRight(strings.TrimSpace(issuer), "/")
 	sum := sha256.Sum256([]byte(canonicalIssuer + "\x00" + subject))
 	return "oidc:" + base64.RawURLEncoding.EncodeToString(sum[:])

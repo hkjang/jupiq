@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/hkjang/jupiq/internal/analytics"
+	"github.com/hkjang/jupiq/internal/auth"
 	"github.com/hkjang/jupiq/internal/integration"
 	"github.com/hkjang/jupiq/internal/store"
 )
@@ -668,7 +670,7 @@ func applySecureIntegrationDefaults(values map[string]any) {
 var allowedSettingKeys = map[string]bool{
 	"system": true, "workflow": true, "auth.oidc": true, "ai": true, "prometheus": true,
 	"kubernetes": true, "notifications": true, "features": true, "llm_usage": true,
-	"security": true, analytics.SettingKey: true,
+	"security": true, analytics.SettingKey: true, auth.MCPOAuthSettingKey: true,
 }
 
 var allowedSettingFields = map[string]map[string]bool{
@@ -683,6 +685,7 @@ var allowedSettingFields = map[string]map[string]bool{
 	"llm_usage":     {"source": true, "pod_username_regex": true, "sample_pod": true, "path_matcher": true, "label_mappings": true, "promql": true, "input_cost_per_million": true, "output_cost_per_million": true, "stale_seconds": true, "retention_days": true},
 	"security":      {"key_rotation_days": true, "key_max_lifetime_days": true, "key_permissions": true},
 	"analytics":     {"enabled": true, "provider": true, "momento_url": true, "momento_site_id": true, "momento_proxy": true, "momento_verify_tls": true, "measurement_id": true, "matomo_url": true, "matomo_site_id": true, "custom_snippet": true, "allowed_hosts": true, "include_admin": true, "placement": true},
+	"mcp.oauth":     {"enabled": true, "resource": true, "audience": true, "scopes": true},
 }
 
 func validateSettingsUpdate(values map[string]any, secrets map[string]string) error {
@@ -721,6 +724,7 @@ func validateSettingSection(key string, object map[string]any) error {
 		"notifications": {"base_url"},
 		"llm_usage":     {"source", "pod_username_regex", "sample_pod", "path_matcher"},
 		"analytics":     {"provider", "momento_url", "momento_site_id", "measurement_id", "matomo_url", "matomo_site_id", "custom_snippet", "allowed_hosts", "placement"},
+		"mcp.oauth":     {"resource"},
 	}
 	for _, field := range stringFields[key] {
 		if raw, exists := object[field]; exists {
@@ -742,6 +746,7 @@ func validateSettingSection(key string, object map[string]any) error {
 		"kubernetes":    {"enabled", "verify_tls"},
 		"notifications": {"webhook_enabled"},
 		"analytics":     {"enabled", "momento_proxy", "momento_verify_tls", "include_admin"},
+		"mcp.oauth":     {"enabled"},
 	}
 	for _, field := range boolFields[key] {
 		if value, exists := object[field]; exists {
@@ -810,6 +815,11 @@ func validateSettingSection(key string, object map[string]any) error {
 	if key == analytics.SettingKey {
 		// provider별 필수 항목과 스니펫 크기 상한은 analytics 패키지가 한곳에서 정한다.
 		if err := analytics.ReadConfig(object).Validate(); err != nil {
+			return err
+		}
+	}
+	if key == auth.MCPOAuthSettingKey {
+		if err := validateMCPOAuthSection(object); err != nil {
 			return err
 		}
 	}
@@ -935,6 +945,73 @@ func validateSettingSection(key string, object map[string]any) error {
 		if err := validateLLMUsage(object); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// validateMCPOAuthSection은 MCP SSO(OAuth) 설정을 검사한다. issuer는 auth.oidc에
+// 있어 여기서 강제하지 않는다 — 비어 있으면 켜 두어도 꺼진 것처럼 동작하고
+// 이유를 로그에 남긴다(auth.MCPOAuthSettings.Inactive).
+func validateMCPOAuthSection(object map[string]any) error {
+	if raw, exists := object["resource"]; exists && !blankString(raw) {
+		if err := validateMCPResource(fmt.Sprint(raw)); err != nil {
+			return fmt.Errorf("mcp.oauth.resource: %w", err)
+		}
+	}
+	if raw, exists := object["audience"]; exists {
+		audience, ok := stringSettingArray(raw)
+		if !ok || len(audience) > 50 {
+			return fmt.Errorf("mcp.oauth.audience는 최대 50개 문자열 배열이어야 합니다")
+		}
+		for _, value := range audience {
+			if strings.TrimSpace(value) == "" || len(value) > 256 || strings.ContainsAny(value, " \t\r\n\"") {
+				return fmt.Errorf("mcp.oauth.audience 값이 올바르지 않습니다: %q", value)
+			}
+		}
+	}
+	enabled, _ := object["enabled"].(bool)
+	if raw, exists := object["scopes"]; exists {
+		scopes, ok := stringSettingArray(raw)
+		if !ok {
+			return fmt.Errorf("mcp.oauth.scopes는 문자열 배열이어야 합니다")
+		}
+		if len(scopes) > 0 || enabled {
+			if err := store.ValidateScopes(scopes); err != nil {
+				return fmt.Errorf("mcp.oauth.scopes: %w", err)
+			}
+		}
+		for _, scope := range scopes {
+			if strings.TrimSpace(scope) == "" || strings.ContainsAny(scope, " \t\r\n") {
+				return fmt.Errorf("mcp.oauth.scopes 값이 올바르지 않습니다: %q", scope)
+			}
+		}
+	} else if enabled {
+		return fmt.Errorf("MCP SSO 사용 시 mcp.oauth.scopes가 필요합니다")
+	}
+	return nil
+}
+
+// validateMCPResource는 리소스 식별자를 검사한다. 이 값은 외부로 나가는 연동
+// 대상이 아니라 이 서버 자신의 공개 주소이므로 loopback 차단(ValidateEndpoint)
+// 은 적용하지 않는다. 대신 토큰의 aud와 문자 그대로 비교되는 값이라 쿼리·
+// fragment·userinfo 없는 절대 URL만 받는다.
+func validateMCPResource(raw string) error {
+	value := strings.TrimSpace(raw)
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return fmt.Errorf("URL 형식이 올바르지 않습니다: %w", err)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("http 또는 https 주소만 사용할 수 있습니다")
+	}
+	if parsed.Hostname() == "" {
+		return fmt.Errorf("호스트 이름이 필요합니다")
+	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" {
+		return fmt.Errorf("userinfo·쿼리·fragment 없는 주소여야 합니다")
+	}
+	if value != parsed.String() || strings.ContainsAny(value, " \t\r\n\"") {
+		return fmt.Errorf("정규화된 절대 URL이어야 합니다(예: https://jupiq.example.com/mcp)")
 	}
 	return nil
 }

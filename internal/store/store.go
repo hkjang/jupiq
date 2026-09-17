@@ -173,6 +173,8 @@ func (s *Store) Seed(ctx context.Context, username, password string) error {
 		"features":      map[string]any{"gpu_monitoring": false, "llm_usage_monitoring": false},
 		"llm_usage":     map[string]any{"source": "prometheus", "pod_username_regex": "^jupyter-(?P<username>[a-zA-Z0-9._-]+)", "path_matcher": "/v1/chat/completions", "label_mappings": map[string]string{}, "promql": map[string]string{"calls": "sum(increase(http_requests_total{path=\"/v1/chat/completions\"}[1m])) by (pod,path,status,model,hub)"}, "input_cost_per_million": 0, "output_cost_per_million": 0, "stale_seconds": 300, "retention_days": 30},
 		"security":      map[string]any{"key_rotation_days": 90, "key_max_lifetime_days": 365, "key_permissions": []string{}},
+		// MCP SSO(OAuth)는 꺼짐이 기본이다. 범위는 MCP 도구 넷이 요구하는 읽기 권한이다.
+		"mcp.oauth": map[string]any{"enabled": false, "resource": "", "audience": []string{}, "scopes": []string{"mcp:use", "dashboard:read", "hubs:read", "servers:read", "usage:read"}},
 	}
 	for key, value := range defaults {
 		blob, _ := json.Marshal(value)

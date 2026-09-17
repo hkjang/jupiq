@@ -199,6 +199,18 @@ func (s *Store) UpsertOIDCUser(ctx context.Context, subject, username, displayNa
 	return s.GetUser(ctx, subjectUserID)
 }
 
+// GetOIDCUserBySubject finds the account a web SSO login already bound to this
+// issuer+subject identity. It never creates or relinks anything: a caller that
+// holds a valid token for an identity jupiq has not seen gets ErrNotFound.
+func (s *Store) GetOIDCUserBySubject(ctx context.Context, subject string) (User, error) {
+	u, err := scanUser(s.Pool.QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE external_subject=$1 AND auth_source='oidc'`, subject))
+	if err != nil {
+		return u, dbNotFound(err)
+	}
+	err = s.populateUserAccess(ctx, &u)
+	return u, err
+}
+
 func oidcLinkDecision(subjectUserID, usernameOwnerID int64, autoCreate bool) (bool, error) {
 	if subjectUserID != 0 {
 		return false, nil
