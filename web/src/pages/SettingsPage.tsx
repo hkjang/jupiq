@@ -594,7 +594,7 @@ export function SettingsPage() {
       <Col xs={24} xl={12}><Card title={<Space><ApiOutlined />MCP SSO(OAuth)</Space>}>
         <Typography.Paragraph type="secondary">MCP 클라이언트(Claude·Cursor 등)에 개인 키 대신 URL 하나만 주면 위 Keycloak으로 로그인해 토큰을 받아 옵니다. jupiq는 토큰을 검사만 하고 계정을 만들지 않으므로, 사용자는 먼저 웹으로 한 번 SSO 로그인해 두어야 합니다. 기본값은 꺼짐입니다.</Typography.Paragraph>
         <Form.Item name={[MCP_OAUTH_KEY, 'enabled']} label="SSO 토큰으로 MCP 접속 허용" valuePropName="checked" extra="Keycloak OIDC의 Issuer URL이 비어 있으면 켜 두어도 동작하지 않고 이유가 서버 로그에 남습니다."><Switch checkedChildren="사용" unCheckedChildren="사용 안 함" /></Form.Item>
-        <Form.Item name={[MCP_OAUTH_KEY, 'resource']} label="리소스 식별자" extra="클라이언트가 실제로 접속하는 공개 주소 + /mcp. 비워 두면 요청의 Host로 만들지만, 리버스 프록시 뒤라면 반드시 적으세요. Keycloak Audience 매퍼에 넣는 값과 같아야 합니다."><Input placeholder="https://jupiq.example.com/mcp" /></Form.Item>
+        <Form.Item name={[MCP_OAUTH_KEY, 'resource']} label="리소스 식별자" extra="클라이언트가 실제로 접속하는 공개 주소 + /mcp. Keycloak Audience 매퍼에 넣는 값과 같아야 하며, 토큰의 aud와 비교되는 값은 여기 적은 값뿐입니다. 비워 두면 아래 표시 주소만 요청의 Host로 만들고 대상 검사는 허용 대상 목록만으로 합니다."><Input placeholder="https://jupiq.example.com/mcp" /></Form.Item>
         <Form.Item noStyle shouldUpdate={(previous, current) => (previous[MCP_OAUTH_KEY] as ApiRecord | undefined)?.resource !== (current[MCP_OAUTH_KEY] as ApiRecord | undefined)?.resource}>
           {() => {
             const resource = mcpResourceFor(String(form.getFieldValue([MCP_OAUTH_KEY, 'resource']) || ''), window.location.origin)

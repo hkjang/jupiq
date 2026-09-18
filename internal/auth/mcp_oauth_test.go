@@ -111,24 +111,64 @@ func TestMCPOAuthRejectsTokensForTheRightReason(t *testing.T) {
 	}
 }
 
+// 리소스 식별자가 비어 있을 때 요청의 Host로 만든 값은 표시용일 뿐 허용 대상이
+// 아니다. 같은 realm의 다른 리소스 서버용 토큰(aud=https://other.example/mcp)을
+// 가진 쪽이 Host: other.example 로 보내도 대상 검사를 통과하지 못해야 한다 —
+// 이 서버는 Host를 검증하지 않으므로 그 값을 믿으면 aud 검사가 없는 것과 같다.
+func TestMCPOAuthEmptyResourceDoesNotTrustTheHostHeader(t *testing.T) {
+	idp := authtest.NewFakeIDP(t)
+	service := &Service{}
+	settings := mcpSettings(idp)
+	settings.Config.Resource = ""
+	otherResource := "https://other.example.test/mcp"
+	token := idp.Sign(t, accessClaims(map[string]any{"aud": otherResource, "azp": "other-app"}))
+
+	r := mcpRequest()
+	r.Host = "other.example.test"
+	if got := settings.Resource(r); got != otherResource {
+		t.Fatalf("the display resource should follow the Host header for this check to mean anything: %q", got)
+	}
+	_, err := service.authenticateMCPOAuth(context.Background(), r, token, settings)
+	var refusal *MCPOAuthRefusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("a token for another resource server was accepted via a forged Host header: %v", err)
+	}
+	if !strings.Contains(refusal.Cause.Error(), "not accepted") {
+		t.Errorf("refused for a different reason than the audience check: %v", refusal.Cause)
+	}
+	if strings.Contains(refusal.Message, `매퍼에 "`+otherResource) || !strings.Contains(refusal.Message, "mcp.oauth.resource") {
+		t.Errorf("the guidance should ask the administrator to write mcp.oauth.resource, not put the forged Host in the mapper: %q", refusal.Message)
+	}
+	// The display value and the challenge still follow the Host — that is
+	// what tells a client where the metadata lives — but only there.
+	if challenge := settings.Challenge(r, true); !strings.Contains(challenge, "https://other.example.test/.well-known/oauth-protected-resource/mcp") {
+		t.Errorf("challenge no longer follows the Host for display: %s", challenge)
+	}
+}
+
 func TestMCPOAuthAudienceRules(t *testing.T) {
 	resource := "https://jupiq.example.test/mcp"
 	cases := []struct {
 		name     string
 		audience []string
 		azp      string
+		resource string
 		allowed  []string
 		want     bool
 	}{
-		{"resource in aud (mapper path)", []string{"account", resource}, "web", nil, true},
-		{"azp listed by the administrator (Keycloak 26 default shape)", []string{"account"}, "claude-mcp", []string{"claude-mcp"}, true},
-		{"aud listed by the administrator", []string{"other-app"}, "", []string{"other-app"}, true},
-		{"nothing matches", []string{"account"}, "claude-mcp", []string{"cursor-mcp"}, false},
-		{"empty list entries are ignored", []string{"account"}, "", []string{"", " "}, false},
-		{"no audience, no azp", nil, "", []string{"claude-mcp"}, false},
+		{"resource in aud (mapper path)", []string{"account", resource}, "web", resource, nil, true},
+		{"azp listed by the administrator (Keycloak 26 default shape)", []string{"account"}, "claude-mcp", resource, []string{"claude-mcp"}, true},
+		{"aud listed by the administrator", []string{"other-app"}, "", resource, []string{"other-app"}, true},
+		{"nothing matches", []string{"account"}, "claude-mcp", resource, []string{"cursor-mcp"}, false},
+		{"empty list entries are ignored", []string{"account"}, "", resource, []string{"", " "}, false},
+		{"no audience, no azp", nil, "", resource, []string{"claude-mcp"}, false},
+		// No configured resource: only the administrator's list admits a token.
+		{"empty resource, aud of another resource server", []string{"https://other.example.test/mcp"}, "", "", nil, false},
+		{"empty resource never matches an empty aud entry", []string{""}, "", "", nil, false},
+		{"empty resource, azp listed", []string{"account"}, "claude-mcp", "", []string{"claude-mcp"}, true},
 	}
 	for _, tc := range cases {
-		if got := mcpAudienceAccepted(tc.audience, tc.azp, resource, tc.allowed); got != tc.want {
+		if got := mcpAudienceAccepted(tc.audience, tc.azp, tc.resource, tc.allowed); got != tc.want {
 			t.Errorf("%s: got %t want %t", tc.name, got, tc.want)
 		}
 	}
@@ -186,6 +226,69 @@ func TestMCPOAuthDiscoveryIsCachedPerIssuer(t *testing.T) {
 	}
 	if _, err := service.mcpProvider(context.Background(), "http://127.0.0.1:1/realms/x", true); err == nil {
 		t.Error("a loopback issuer passed the integration endpoint guard")
+	}
+}
+
+// Keycloak이 닿지 않는 동안 JWT 모양 bearer를 실은 /mcp 요청마다 Discovery를
+// 다시 시도하면 안 된다: 실패도 짧게 기억해 그 동안은 IdP에 가지 않고 즉시
+// 같은 오류로 거부한다. 기억이 끝나면 다시 시도해 복구를 알아챈다.
+func TestMCPOAuthDiscoveryFailureIsCachedBriefly(t *testing.T) {
+	idp := authtest.NewFakeIDP(t)
+	service := &Service{}
+	idp.DiscoveryDown.Store(true)
+
+	if _, err := service.mcpProvider(context.Background(), idp.URL(), true); err == nil {
+		t.Fatal("discovery succeeded while the provider was down")
+	}
+	attempts := idp.DiscoveryRequests.Load()
+	if attempts == 0 {
+		t.Fatal("the first call never reached the provider")
+	}
+	// The provider recovers, but the failure is still remembered: the next
+	// calls must not reach it and must answer at once with the same error.
+	idp.DiscoveryDown.Store(false)
+	started := time.Now()
+	for i := 0; i < 3; i++ {
+		if _, err := service.mcpProvider(context.Background(), idp.URL(), true); err == nil {
+			t.Fatal("a cached discovery failure was not returned")
+		}
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Errorf("cached failures took %s to answer", elapsed)
+	}
+	if got := idp.DiscoveryRequests.Load(); got != attempts {
+		t.Errorf("discovery was retried while the failure was cached: %d -> %d", attempts, got)
+	}
+	// A token in that window is refused with the discovery guidance, without
+	// reaching the provider either.
+	settings := mcpSettings(idp)
+	refusal := refusalFor(t, service, settings, idp.Sign(t, accessClaims(nil)))
+	if !strings.Contains(refusal.Message, "발급자 정보") || !strings.Contains(refusal.Cause.Error(), "discovery") {
+		t.Errorf("token refused for another reason during the outage: %q / %v", refusal.Message, refusal.Cause)
+	}
+	if got := idp.DiscoveryRequests.Load(); got != attempts {
+		t.Errorf("a token during the outage triggered discovery: %d -> %d", attempts, got)
+	}
+
+	// Once the negative entry expires the provider is consulted again and
+	// the recovery is seen.
+	service.mcpMu.Lock()
+	key := idp.URL() + "|true"
+	entry := service.mcpProviders[key]
+	if entry.err == nil || entry.provider != nil {
+		t.Fatalf("no negative entry was cached: %+v", entry)
+	}
+	if ttl := time.Until(entry.expires); ttl > mcpProviderFailureTTL || ttl < mcpProviderFailureTTL-10*time.Second {
+		t.Errorf("negative entry TTL is %s, want about %s", ttl, mcpProviderFailureTTL)
+	}
+	entry.expires = time.Now().Add(-time.Second)
+	service.mcpProviders[key] = entry
+	service.mcpMu.Unlock()
+	if _, err := service.mcpProvider(context.Background(), idp.URL(), true); err != nil {
+		t.Fatalf("discovery was not retried after the negative entry expired: %v", err)
+	}
+	if got := idp.DiscoveryRequests.Load(); got != attempts+1 {
+		t.Errorf("expected exactly one retry after expiry: %d -> %d", attempts, got)
 	}
 }
 

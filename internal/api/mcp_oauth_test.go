@@ -94,6 +94,10 @@ func TestMCPUnauthorizedLogsTheOriginalCauseAndAnswersWithTheGuidance(t *testing
 	s := &Server{Auth: &auth.Service{}, Logger: slog.New(slog.NewTextHandler(logs, nil))}
 	r := httptest.NewRequest(http.MethodPost, "/mcp", nil)
 	r.Header.Set("Authorization", "Bearer a.b.c")
+	// The middleware would have stamped this; called directly, the header is
+	// what requestID reads, and the log line must carry it so the refusal
+	// can be matched to its access-log entry.
+	r.Header.Set("X-Request-ID", "req-mcp-unit-1")
 	rec := httptest.NewRecorder()
 	s.mcpUnauthorized(rec, r, &auth.MCPOAuthRefusal{Message: "클라이언트용 안내", Cause: io.ErrUnexpectedEOF})
 	if rec.Code != http.StatusUnauthorized || !strings.Contains(rec.Body.String(), "클라이언트용 안내") {
@@ -104,5 +108,10 @@ func TestMCPUnauthorizedLogsTheOriginalCauseAndAnswersWithTheGuidance(t *testing
 	}
 	if !strings.Contains(logs.String(), "mcp oauth token refused") || !strings.Contains(logs.String(), io.ErrUnexpectedEOF.Error()) {
 		t.Errorf("the original verification error was not logged: %s", logs.String())
+	}
+	for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+		if strings.Contains(line, "mcp oauth token refused") && !strings.Contains(line, "request_id=req-mcp-unit-1") {
+			t.Errorf("the refusal log line does not carry the request id: %s", line)
+		}
 	}
 }

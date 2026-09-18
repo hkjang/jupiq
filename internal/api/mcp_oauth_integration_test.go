@@ -245,11 +245,24 @@ func TestMCPOAuthResourceServerIntegration(t *testing.T) {
 		}
 		logs.Reset()
 		refusedWith("another application's token", token(map[string]any{"aud": "account", "azp": marker + "-other-app"}), "발급된 것이 아닙니다")
-		if body := mcpCall(handler, "/mcp", token(map[string]any{"aud": "account", "azp": marker + "-other-app"}), mcpListTools).Body.String(); !strings.Contains(body, "aud=[account]") || !strings.Contains(body, marker+"-other-app") || !strings.Contains(body, resource) {
+		otherApp := mcpCall(handler, "/mcp", token(map[string]any{"aud": "account", "azp": marker + "-other-app"}), mcpListTools)
+		if body := otherApp.Body.String(); !strings.Contains(body, "aud=[account]") || !strings.Contains(body, marker+"-other-app") || !strings.Contains(body, resource) {
 			t.Errorf("audience refusal lacks what was seen and what to write: %s", body)
 		}
-		if !strings.Contains(logs.String(), "mcp oauth token refused") || !strings.Contains(logs.String(), "not accepted") {
-			t.Errorf("the audience failure was not logged with its cause: %s", logs.String())
+		// The refusal log line carries the cause and the request id the
+		// middleware issued, so it can be matched to the access-log entry.
+		id := otherApp.Header().Get("X-Request-ID")
+		if id == "" {
+			t.Fatal("the middleware did not stamp X-Request-ID")
+		}
+		var refusalLine string
+		for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+			if strings.Contains(line, "mcp oauth token refused") && strings.Contains(line, "request_id="+id) {
+				refusalLine = line
+			}
+		}
+		if refusalLine == "" || !strings.Contains(refusalLine, "not accepted") {
+			t.Errorf("the audience failure was not logged with its cause and request id %q: %s", id, logs.String())
 		}
 		refusedWith("unknown account", token(map[string]any{"sub": marker + "-stranger"}), "등록되지 않았거나")
 		var strangers int

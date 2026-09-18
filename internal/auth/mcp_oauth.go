@@ -41,8 +41,9 @@ const MCPResourceMetadataPath = "/.well-known/oauth-protected-resource"
 type MCPOAuthConfig struct {
 	Enabled bool `json:"enabled"`
 	// Resource는 클라이언트가 실제로 접속하는 공개 주소 + MCP 경로다
-	// (RFC 8707). 비어 있으면 요청의 Host로 만든다 — 프록시 뒤에서는 관리자가
-	// 적어야 한다.
+	// (RFC 8707). 토큰의 aud와 비교되는 값은 이것뿐이다. 비어 있으면 메타데이터·
+	// 401 도전에 보이는 주소만 요청의 Host로 만들고, aud 비교는 건너뛰어
+	// mcp.oauth.audience 목록만 본다 — 프록시 뒤에서는 관리자가 적어야 한다.
 	Resource string `json:"resource"`
 	// Audience는 aud 또는 azp와 비교할 허용 대상이다. 실제 Keycloak 26은
 	// aud에 account만 싣고 클라이언트 ID는 azp에 담으므로, Audience 매퍼 없이
@@ -102,7 +103,8 @@ func (s *Service) MCPOAuthSettings(ctx context.Context) (MCPOAuthSettings, error
 
 // Inactive는 켜 두었는데도 꺼진 것처럼 동작하는 이유를 돌려준다. 활성이면
 // 빈 문자열이다. 켜는 조건은 스위치와 OIDC issuer 둘 다 있는 것이다 — MCP
-// 자체는 항상 켜져 있고, 리소스 식별자는 요청에서 만들 수 있다.
+// 자체는 항상 켜져 있고, 리소스 식별자가 비어 있으면 대상 검사는
+// mcp.oauth.audience 목록만으로 한다(AudienceResource).
 func (m MCPOAuthSettings) Inactive() string {
 	if !m.Config.Enabled {
 		return "mcp.oauth.enabled가 꺼져 있습니다"
@@ -115,10 +117,20 @@ func (m MCPOAuthSettings) Inactive() string {
 
 func (m MCPOAuthSettings) Active() bool { return m.Inactive() == "" }
 
-// Resource는 이 배포가 주장하는 리소스 식별자다. 설정이 비어 있을 때만 요청의
-// Host를 쓴다 — 누구나 바꿀 수 있는 헤더이므로 마지막 수단이다.
+// AudienceResource는 토큰의 aud와 비교하는 리소스 식별자다. 관리자가 적은
+// 값만 쓴다 — 비어 있으면 빈 문자열이고 대상 검사는 aud 비교를 건너뛴다.
+// 요청의 Host로 만든 값은 절대 여기 오지 않는다: 이 서버는 Host를 검증하지
+// 않으므로, 같은 realm의 다른 리소스 서버용 토큰을 가진 쪽이 Host를 그
+// 리소스로 적어 보내면 대상 검사를 통과해 버린다(audience confusion).
+func (m MCPOAuthSettings) AudienceResource() string {
+	return strings.TrimSpace(m.Config.Resource)
+}
+
+// Resource는 메타데이터·WWW-Authenticate에 보이는 리소스 식별자다. 설정이
+// 비어 있을 때만 요청의 Host로 만든다 — 표시용일 뿐, 대상 검사에는 쓰지
+// 않는다(AudienceResource).
 func (m MCPOAuthSettings) Resource(r *http.Request) string {
-	if resource := strings.TrimSpace(m.Config.Resource); resource != "" {
+	if resource := m.AudienceResource(); resource != "" {
 		return resource
 	}
 	scheme := "http"
@@ -204,25 +216,35 @@ func refuse(message string, cause error) error {
 // 공유 비밀이고 none은 서명이 아니다.
 var mcpSigningAlgs = []string{oidc.RS256, oidc.RS384, oidc.RS512, oidc.ES256, oidc.ES384, oidc.ES512, oidc.PS256, oidc.PS384, oidc.PS512}
 
-const mcpProviderTTL = 10 * time.Minute
+const (
+	mcpProviderTTL = 10 * time.Minute
+	// mcpProviderFailureTTL은 실패한 Discovery를 기억하는 시간이다. Keycloak이
+	// 닿지 않는 동안 JWT 모양 bearer를 실은 /mcp 요청마다(익명 요청도 iss만
+	// 다르게 적으면 된다) 10초 타임아웃까지 아웃바운드 호출을 하지 않도록,
+	// 그 동안은 같은 오류로 즉시 거부한다. 복구는 이 시간 안에 알아챈다.
+	mcpProviderFailureTTL = 30 * time.Second
+)
 
 // mcpProviderEntry는 issuer별 Discovery 결과다. Provider가 JWKS를 안에서
 // 캐시하고 모르는 kid는 스스로 다시 받아 오므로 키 회전에 무효화가 필요 없다.
+// 실패도 항목이다(provider nil, err 있음) — 짧은 TTL의 negative cache.
 type mcpProviderEntry struct {
 	provider *oidc.Provider
+	err      error
 	expires  time.Time
 }
 
 // mcpProvider는 Discovery를 issuer·TLS 검증 여부별로 재사용한다. 요청마다
 // 받아 오면 Keycloak의 지연이 MCP 호출마다 앞에 붙는다. 요청 컨텍스트에서
 // 떼어 낸(WithoutCancel) 컨텍스트로 만들어, 돌려받은 Provider가 나중의 키
-// 조회에 취소된 요청을 붙들지 않게 한다.
+// 조회에 취소된 요청을 붙들지 않게 한다. 잠금은 맵 읽기·쓰기에만 둔다 —
+// Discovery 자체를 잠금 안에서 하면 Keycloak의 지연이 모든 MCP 요청을 세운다.
 func (s *Service) mcpProvider(ctx context.Context, issuer string, verifyTLS bool) (*oidc.Provider, error) {
 	key := fmt.Sprintf("%s|%t", issuer, verifyTLS)
 	s.mcpMu.Lock()
 	if entry, ok := s.mcpProviders[key]; ok && time.Now().Before(entry.expires) {
 		s.mcpMu.Unlock()
-		return entry.provider, nil
+		return entry.provider, entry.err
 	}
 	s.mcpMu.Unlock()
 	if _, err := integration.ValidateEndpoint(issuer); err != nil {
@@ -232,16 +254,22 @@ func (s *Service) mcpProvider(ctx context.Context, issuer string, verifyTLS bool
 	discoverCtx, cancel := context.WithTimeout(providerCtx, 10*time.Second)
 	defer cancel()
 	provider, err := oidc.NewProvider(discoverCtx, issuer)
+	entry := mcpProviderEntry{provider: provider, expires: time.Now().Add(mcpProviderTTL)}
 	if err != nil {
-		return nil, err
+		entry = mcpProviderEntry{err: err, expires: time.Now().Add(mcpProviderFailureTTL)}
 	}
 	s.mcpMu.Lock()
 	if s.mcpProviders == nil {
 		s.mcpProviders = map[string]mcpProviderEntry{}
 	}
-	s.mcpProviders[key] = mcpProviderEntry{provider: provider, expires: time.Now().Add(mcpProviderTTL)}
+	if current, ok := s.mcpProviders[key]; err != nil && ok && current.err == nil && time.Now().Before(current.expires) {
+		// 동시에 뛴 다른 Discovery가 그 사이 성공했다면 그쪽이 맞다.
+		s.mcpMu.Unlock()
+		return current.provider, nil
+	}
+	s.mcpProviders[key] = entry
 	s.mcpMu.Unlock()
-	return provider, nil
+	return provider, err
 }
 
 // ForgetMCPProviders는 캐시한 Discovery를 버린다(테스트·설정 변경용).
@@ -287,10 +315,18 @@ func (s *Service) authenticateMCPOAuth(ctx context.Context, r *http.Request, tok
 	if strings.TrimSpace(verified.Subject) == "" {
 		return Principal{}, refuse("SSO 토큰에 사용자 식별 정보(sub)가 없습니다.", errors.New("mcp oauth token rejected: empty sub"))
 	}
-	resource := settings.Resource(r)
+	// 대상 검사에는 관리자가 적은 리소스 식별자만 쓴다. 요청의 Host로 만든
+	// 표시용 값(settings.Resource)은 여기 오면 안 된다 — 클라이언트가 고르는
+	// 헤더를 허용 대상으로 삼는 것이 되어 aud 검사가 막아야 할 audience
+	// confusion을 그대로 연다.
+	resource := settings.AudienceResource()
 	if !mcpAudienceAccepted(verified.Audience, claims.AuthorizedBy, resource, settings.Config.Audience) {
+		mapperHint := fmt.Sprintf("Keycloak 클라이언트의 Audience 매퍼에 %q를 넣어야 합니다", resource)
+		if resource == "" {
+			mapperHint = "리소스 식별자(mcp.oauth.resource)를 이 서버의 공개 주소로 적고 Keycloak 클라이언트의 Audience 매퍼에 같은 값을 넣어야 합니다"
+		}
 		return Principal{}, refuse(
-			fmt.Sprintf("SSO 토큰이 이 서버를 위해 발급된 것이 아닙니다(aud=%v, azp=%q). 관리자가 허용 대상(mcp.oauth.audience)에 그 클라이언트 ID를 적거나, Keycloak 클라이언트의 Audience 매퍼에 %q를 넣어야 합니다.", verified.Audience, claims.AuthorizedBy, resource),
+			fmt.Sprintf("SSO 토큰이 이 서버를 위해 발급된 것이 아닙니다(aud=%v, azp=%q). 관리자가 허용 대상(mcp.oauth.audience)에 그 클라이언트 ID를 적거나, %s.", verified.Audience, claims.AuthorizedBy, mapperHint),
 			fmt.Errorf("mcp oauth token rejected: aud %v / azp %q not accepted for %q", verified.Audience, claims.AuthorizedBy, resource))
 	}
 	// 웹 로그인이 묶어 둔 계정을 찾는다. 만드는 쪽 절반은 없다.
@@ -299,16 +335,19 @@ func (s *Service) authenticateMCPOAuth(ctx context.Context, r *http.Request, tok
 		return Principal{}, refuse("이 SSO 계정은 jupiq에 등록되지 않았거나 비활성입니다. 먼저 웹으로 한 번 로그인하세요.", errors.New("mcp oauth token rejected: no active jupiq account for subject"))
 	}
 	if err != nil {
-		return Principal{}, err
+		// 저장소 오류의 원문(pgx 메시지 등)은 로그에만 남긴다. 세션·API 키
+		// 경로(authenticateJWT)와 같이 클라이언트에는 고정 문구만 간다.
+		return Principal{}, refuse("계정 정보를 확인할 수 없습니다. 잠시 후 다시 시도하세요.", fmt.Errorf("mcp oauth account lookup: %w", err))
 	}
 	return Principal{User: user, UserPermissions: user.Permissions, OAuthScopes: append([]string{}, settings.Config.Scopes...)}, nil
 }
 
-// mcpAudienceAccepted는 토큰이 이 서버를 위한 것인지 본다. aud에 리소스
-// 식별자가 있거나(Audience 매퍼를 둔 정식 경로), aud 또는 azp가 관리자의
-// 허용 대상에 있으면(매퍼 없이 쓰는 호환 경로) 받는다.
+// mcpAudienceAccepted는 토큰이 이 서버를 위한 것인지 본다. aud에 관리자가
+// 적은 리소스 식별자가 있거나(Audience 매퍼를 둔 정식 경로), aud 또는 azp가
+// 관리자의 허용 대상에 있으면(매퍼 없이 쓰는 호환 경로) 받는다. resource가
+// 비어 있으면 첫 분기는 없다 — 허용 목록만 본다.
 func mcpAudienceAccepted(audience []string, azp, resource string, allowed []string) bool {
-	if slices.Contains(audience, resource) {
+	if resource != "" && slices.Contains(audience, resource) {
 		return true
 	}
 	for _, value := range allowed {

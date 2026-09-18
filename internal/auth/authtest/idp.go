@@ -28,6 +28,12 @@ type FakeIDP struct {
 	KeyID  string
 	// JWKSRequests counts key-set fetches so tests can see caching at work.
 	JWKSRequests atomic.Int64
+	// DiscoveryRequests counts openid-configuration fetches, including the
+	// ones refused while DiscoveryDown is set.
+	DiscoveryRequests atomic.Int64
+	// DiscoveryDown makes the discovery document answer 503, standing in for
+	// an unreachable Keycloak without closing the server.
+	DiscoveryDown atomic.Bool
 }
 
 // URL은 issuer다.
@@ -69,6 +75,11 @@ func NewFakeIDP(t *testing.T) *FakeIDP {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		idp.DiscoveryRequests.Add(1)
+		if idp.DiscoveryDown.Load() {
+			http.Error(w, "identity provider down", http.StatusServiceUnavailable)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"issuer":                                idp.Server.URL,

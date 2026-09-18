@@ -390,7 +390,7 @@ jupiq는 **리소스 서버**입니다. 로그인 화면·토큰 발급·클라�
 | 항목(설정 키) | 기본값 | 뜻 |
 |---|---|---|
 | SSO 토큰으로 MCP 접속 허용(`mcp.oauth.enabled`) | 꺼짐 | 켜도 `Keycloak OIDC`의 Issuer URL이 비어 있으면 꺼진 것처럼 동작하고 이유가 로그(`mcp oauth is enabled but inactive`)에 남습니다 |
-| 리소스 식별자(`mcp.oauth.resource`) | 빈 값 | 클라이언트가 실제로 접속하는 **공개 주소 + `/mcp`**(예 `https://jupiq.example.com/mcp`). 비면 요청의 Host로 만듭니다 — 누구나 바꿀 수 있는 헤더이므로 **리버스 프록시 뒤에서는 반드시 적으세요**. 토큰의 `aud`와 문자 그대로 비교됩니다 |
+| 리소스 식별자(`mcp.oauth.resource`) | 빈 값 | 클라이언트가 실제로 접속하는 **공개 주소 + `/mcp`**(예 `https://jupiq.example.com/mcp`). 토큰의 `aud`와 문자 그대로 비교되는 값은 **여기 적은 값뿐**입니다. 비우면 메타데이터·401 응답에 보이는 주소만 요청의 Host로 만들고(누구나 바꿀 수 있는 헤더이므로 대상 검사에는 쓰지 않음), 대상 검사는 `허용 대상` 목록만으로 합니다 — Audience 매퍼 경로를 쓰거나 리버스 프록시 뒤라면 **반드시 적으세요** |
 | 허용 대상(`mcp.oauth.audience`) | 빈 목록 | 토큰의 `aud` 또는 `azp`가 이 목록에 있으면 받습니다. 보통 MCP 클라이언트 ID를 적습니다 |
 | SSO 주체에게 주는 범위(`mcp.oauth.scopes`) | `mcp:use dashboard:read hubs:read servers:read usage:read` | 개인 키와 같은 권한 어휘. MCP 도구 넷이 요구하는 읽기 권한이 기본입니다 |
 | (재사용) Issuer URL·TLS 검증 | `Keycloak OIDC` 카드 | 토큰의 `iss`와 서명 키(JWKS)를 이 발급자에서 가져옵니다. 새로 만들지 않습니다 |
@@ -412,7 +412,8 @@ jupiq는 **리소스 서버**입니다. 로그인 화면·토큰 발급·클라�
 **대상 검사**가 핵심입니다. 다른 앱에 로그인해 받은 토큰이 jupiq의 `/mcp`를 열어서는 안 되므로, 둘
 중 하나는 맞아야 합니다.
 
-1. `aud`에 리소스 식별자가 있다 — Keycloak에 Audience 매퍼를 둔 정식 경로.
+1. `aud`에 리소스 식별자가 있다 — Keycloak에 Audience 매퍼를 둔 정식 경로. `mcp.oauth.resource`가 비어
+   있으면 이 경로는 없습니다(요청의 Host로 만든 주소는 비교하지 않음).
 2. `aud` 또는 `azp`가 `허용 대상`에 있다 — 매퍼 없이 쓰는 호환 경로. **실제 Keycloak 26은 `aud`에
    `account`만 싣고 클라이언트 ID는 `azp`에 담으므로**, MCP 클라이언트 ID를 허용 대상에 적으면
    매퍼 없이 동작합니다.
