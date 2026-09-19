@@ -111,7 +111,7 @@ docker rm -f jupiq-it
 ```
 
 - `govulncheck`는 취약점 DB 조회에 네트워크가 필요합니다. 오프라인이면 실패하는 것이 정상이며 건너뛰는 옵션은 없습니다.
-- `internal/auth/authtest`의 가짜 OIDC 제공자는 loopback이 아닌 로컬 네트워크 인터페이스에 바인딩합니다. 그런 인터페이스가 없는 환경(일부 컨테이너·샌드박스)에서는 해당 테스트가 skip되므로 출력을 확인하세요.
+- `internal/api`의 JupyterHub 통합 테스트(`integration_preflight_test.go`의 `nonLoopbackIPv4`)는 SSRF 방어가 loopback을 차단하므로 가짜 JupyterHub를 loopback이 아닌 로컬 IPv4 인터페이스에 띄웁니다. 그런 인터페이스가 없는 환경(일부 컨테이너·샌드박스)에서는 해당 테스트가 skip되므로 출력을 확인하세요.
 - 성공하면 마지막 줄에 `release-check OK`가 출력됩니다.
 
 Frontend는 same-origin `/api/v1`을 사용합니다. 프로덕션 빌드의 `web/dist`는 Go 서버가 SPA fallback으로 제공합니다. 이때 content hash가 붙는 `/assets/*`는 1년 `immutable`로, 이름이 고정인 나머지 정적 파일은 매 요청 재검증으로, `index.html`은 `no-store`로 응답합니다.
