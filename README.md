@@ -99,6 +99,21 @@ npm run dev
 go run ./cmd/jupiq
 ```
 
+### 릴리스 전 로컬 검증
+
+릴리스 Workflow(`.github/workflows/release.yml`)의 "소스 검사와 테스트" 단계를 같은 명령·같은 순서로 로컬에서 재현합니다. 통합 테스트는 PostgreSQL이 필요하며, `make test-integration`은 DSN이 없으면 조용히 건너뛰지 않고 안내와 함께 실패합니다.
+
+```bash
+docker run -d --name jupiq-it -e POSTGRES_DB=jupiq_test -e POSTGRES_USER=jupiq -e POSTGRES_PASSWORD=it -p 5432:5432 postgres:16-alpine
+export JUPIQ_INTEGRATION_TEST_DSN='postgres://jupiq:it@127.0.0.1:5432/jupiq_test?sslmode=disable'
+make release-check   # go mod verify → vet → govulncheck → go test → 통합 테스트 → 스크린샷 검사 → npm ci/audit/lint/test/build
+docker rm -f jupiq-it
+```
+
+- `govulncheck`는 취약점 DB 조회에 네트워크가 필요합니다. 오프라인이면 실패하는 것이 정상이며 건너뛰는 옵션은 없습니다.
+- `internal/auth/authtest`의 가짜 OIDC 제공자는 loopback이 아닌 로컬 네트워크 인터페이스에 바인딩합니다. 그런 인터페이스가 없는 환경(일부 컨테이너·샌드박스)에서는 해당 테스트가 skip되므로 출력을 확인하세요.
+- 성공하면 마지막 줄에 `release-check OK`가 출력됩니다.
+
 Frontend는 same-origin `/api/v1`을 사용합니다. 프로덕션 빌드의 `web/dist`는 Go 서버가 SPA fallback으로 제공합니다. 이때 content hash가 붙는 `/assets/*`는 1년 `immutable`로, 이름이 고정인 나머지 정적 파일은 매 요청 재검증으로, `index.html`은 `no-store`로 응답합니다.
 
 ## 컨테이너와 오프라인 패키지
