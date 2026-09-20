@@ -229,7 +229,11 @@ paths:
                     type: string
                     format: date-time
                     description: 집계가 완료된 마지막 시각. 진행 중인 시간대는 제외된다.
-        '400': { $ref: '#/components/responses/Error' }
+        '400':
+          description: 잘못된 from·to 범위(invalid_range) 또는 정수가 아니거나 음수인 limit(invalid_query)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
   /llm-usage:
     get:
       tags: [Operations]
@@ -339,6 +343,7 @@ paths:
                       page: { type: integer }
                       page_size: { type: integer }
                       total: { type: integer }
+        '400': { $ref: '#/components/responses/InvalidQuery' }
   /users/{username}:
     get:
       tags: [Operations]
@@ -393,6 +398,7 @@ paths:
                 properties:
                   data: { type: array, items: { $ref: '#/components/schemas/ServiceUser' } }
                   meta: { type: object, additionalProperties: true }
+        '400': { $ref: '#/components/responses/InvalidQuery' }
   /local-users/{id}/roles:
     put:
       tags: [Administration]
@@ -460,7 +466,9 @@ paths:
       parameters:
         - { $ref: '#/components/parameters/Sort' }
         - { $ref: '#/components/parameters/SortOrder' }
-      responses: { '200': { $ref: '#/components/responses/List' } }
+      responses:
+        '200': { $ref: '#/components/responses/List' }
+        '400': { $ref: '#/components/responses/InvalidQuery' }
   /servers/{id}/{action}:
     post:
       tags: [Operations]
@@ -476,7 +484,9 @@ paths:
       tags: [Administration]
       operationId: listApprovals
       description: 승인 요청 목록. 상태는 pending_review, pending, executing, approved, rejected, failed 중 하나다.
-      responses: { '200': { $ref: '#/components/responses/List' } }
+      responses:
+        '200': { $ref: '#/components/responses/List' }
+        '400': { $ref: '#/components/responses/InvalidQuery' }
   /approvals/{id}:
     get:
       tags: [Administration]
@@ -547,7 +557,9 @@ paths:
         - { name: page_size, in: query, schema: { type: integer, minimum: 1, maximum: 200 } }
         - { $ref: '#/components/parameters/Sort' }
         - { $ref: '#/components/parameters/SortOrder' }
-      responses: { '200': { $ref: '#/components/responses/List' } }
+      responses:
+        '200': { $ref: '#/components/responses/List' }
+        '400': { $ref: '#/components/responses/InvalidQuery' }
   /metrics:
     get:
       tags: [Operations]
@@ -556,8 +568,14 @@ paths:
         - { name: from, in: query, schema: { type: string, format: date-time } }
         - { name: to, in: query, schema: { type: string, format: date-time } }
         - { name: metric, in: query, schema: { type: string } }
-        - { name: limit, in: query, schema: { type: integer, maximum: 5000 } }
-      responses: { '200': { $ref: '#/components/responses/Success' } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 0, maximum: 5000 } }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '400':
+          description: 잘못된 from·to 범위(invalid_range) 또는 정수가 아니거나 음수인 limit(invalid_query)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
   /gpus:
     get:
       tags: [Operations]
@@ -658,49 +676,49 @@ paths:
           description: OpenAI 호환 SSE 스트림
           content: { text/event-stream: { schema: { type: string } } }
   /policies:
-    get: { tags: [Administration], operationId: listPolicies, parameters: [{ $ref: '#/components/parameters/Sort' }, { $ref: '#/components/parameters/SortOrder' }], responses: { '200': { $ref: '#/components/responses/List' } } }
+    get: { tags: [Administration], operationId: listPolicies, parameters: [{ $ref: '#/components/parameters/Sort' }, { $ref: '#/components/parameters/SortOrder' }], responses: { '200': { $ref: '#/components/responses/List' }, '400': { $ref: '#/components/responses/InvalidQuery' } } }
     post: { tags: [Administration], operationId: createPolicy, requestBody: { $ref: '#/components/requestBodies/ResourceWrite' }, responses: { '201': { $ref: '#/components/responses/Success' } } }
   /policies/{id}:
     get: { tags: [Administration], operationId: getPolicy, parameters: [{ $ref: '#/components/parameters/ID' }], responses: { '200': { $ref: '#/components/responses/Success' } } }
     put: { tags: [Administration], operationId: updatePolicy, parameters: [{ $ref: '#/components/parameters/ID' }], requestBody: { $ref: '#/components/requestBodies/ResourceWrite' }, responses: { '200': { $ref: '#/components/responses/Success' } } }
     delete: { tags: [Administration], operationId: deletePolicy, parameters: [{ $ref: '#/components/parameters/ID' }], responses: { '204': { description: 삭제 완료 } } }
   /profiles:
-    get: { tags: [Administration], operationId: listProfiles, parameters: [{ $ref: '#/components/parameters/Sort' }, { $ref: '#/components/parameters/SortOrder' }], responses: { '200': { $ref: '#/components/responses/List' } } }
+    get: { tags: [Administration], operationId: listProfiles, parameters: [{ $ref: '#/components/parameters/Sort' }, { $ref: '#/components/parameters/SortOrder' }], responses: { '200': { $ref: '#/components/responses/List' }, '400': { $ref: '#/components/responses/InvalidQuery' } } }
     post: { tags: [Administration], operationId: createProfile, requestBody: { $ref: '#/components/requestBodies/ResourceWrite' }, responses: { '201': { $ref: '#/components/responses/Success' } } }
   /profiles/{id}:
     get: { tags: [Administration], operationId: getProfile, parameters: [{ $ref: '#/components/parameters/ID' }], responses: { '200': { $ref: '#/components/responses/Success' } } }
     put: { tags: [Administration], operationId: updateProfile, parameters: [{ $ref: '#/components/parameters/ID' }], requestBody: { $ref: '#/components/requestBodies/ResourceWrite' }, responses: { '200': { $ref: '#/components/responses/Success' } } }
     delete: { tags: [Administration], operationId: deleteProfile, parameters: [{ $ref: '#/components/parameters/ID' }], responses: { '204': { description: 삭제 완료 } } }
   /images:
-    get: { tags: [Administration], operationId: listImages, parameters: [{ $ref: '#/components/parameters/Sort' }, { $ref: '#/components/parameters/SortOrder' }], responses: { '200': { $ref: '#/components/responses/List' } } }
+    get: { tags: [Administration], operationId: listImages, parameters: [{ $ref: '#/components/parameters/Sort' }, { $ref: '#/components/parameters/SortOrder' }], responses: { '200': { $ref: '#/components/responses/List' }, '400': { $ref: '#/components/responses/InvalidQuery' } } }
     post: { tags: [Administration], operationId: createImage, requestBody: { $ref: '#/components/requestBodies/ResourceWrite' }, responses: { '201': { $ref: '#/components/responses/Success' } } }
   /images/{id}:
     get: { tags: [Administration], operationId: getImage, parameters: [{ $ref: '#/components/parameters/ID' }], responses: { '200': { $ref: '#/components/responses/Success' } } }
     put: { tags: [Administration], operationId: updateImage, parameters: [{ $ref: '#/components/parameters/ID' }], requestBody: { $ref: '#/components/requestBodies/ResourceWrite' }, responses: { '200': { $ref: '#/components/responses/Success' } } }
     delete: { tags: [Administration], operationId: deleteImage, parameters: [{ $ref: '#/components/parameters/ID' }], responses: { '204': { description: 삭제 완료 } } }
   /projects:
-    get: { tags: [Administration], operationId: listProjects, parameters: [{ $ref: '#/components/parameters/Sort' }, { $ref: '#/components/parameters/SortOrder' }], responses: { '200': { $ref: '#/components/responses/List' } } }
+    get: { tags: [Administration], operationId: listProjects, parameters: [{ $ref: '#/components/parameters/Sort' }, { $ref: '#/components/parameters/SortOrder' }], responses: { '200': { $ref: '#/components/responses/List' }, '400': { $ref: '#/components/responses/InvalidQuery' } } }
     post: { tags: [Administration], operationId: createProject, requestBody: { $ref: '#/components/requestBodies/ResourceWrite' }, responses: { '201': { $ref: '#/components/responses/Success' } } }
   /projects/{id}:
     get: { tags: [Administration], operationId: getProject, parameters: [{ $ref: '#/components/parameters/ID' }], responses: { '200': { $ref: '#/components/responses/Success' } } }
     put: { tags: [Administration], operationId: updateProject, parameters: [{ $ref: '#/components/parameters/ID' }], requestBody: { $ref: '#/components/requestBodies/ResourceWrite' }, responses: { '200': { $ref: '#/components/responses/Success' } } }
     delete: { tags: [Administration], operationId: deleteProject, parameters: [{ $ref: '#/components/parameters/ID' }], responses: { '204': { description: 삭제 완료 } } }
   /incidents:
-    get: { tags: [Administration], operationId: listIncidents, parameters: [{ $ref: '#/components/parameters/Sort' }, { $ref: '#/components/parameters/SortOrder' }], responses: { '200': { $ref: '#/components/responses/List' } } }
+    get: { tags: [Administration], operationId: listIncidents, parameters: [{ $ref: '#/components/parameters/Sort' }, { $ref: '#/components/parameters/SortOrder' }], responses: { '200': { $ref: '#/components/responses/List' }, '400': { $ref: '#/components/responses/InvalidQuery' } } }
     post: { tags: [Administration], operationId: createIncident, requestBody: { $ref: '#/components/requestBodies/ResourceWrite' }, responses: { '201': { $ref: '#/components/responses/Success' } } }
   /incidents/{id}:
     get: { tags: [Administration], operationId: getIncident, parameters: [{ $ref: '#/components/parameters/ID' }], responses: { '200': { $ref: '#/components/responses/Success' } } }
     put: { tags: [Administration], operationId: updateIncident, parameters: [{ $ref: '#/components/parameters/ID' }], requestBody: { $ref: '#/components/requestBodies/ResourceWrite' }, responses: { '200': { $ref: '#/components/responses/Success' } } }
     delete: { tags: [Administration], operationId: deleteIncident, parameters: [{ $ref: '#/components/parameters/ID' }], responses: { '204': { description: 삭제 완료 } } }
   /notifications:
-    get: { tags: [Administration], operationId: listNotifications, parameters: [{ $ref: '#/components/parameters/Sort' }, { $ref: '#/components/parameters/SortOrder' }], responses: { '200': { $ref: '#/components/responses/List' } } }
+    get: { tags: [Administration], operationId: listNotifications, parameters: [{ $ref: '#/components/parameters/Sort' }, { $ref: '#/components/parameters/SortOrder' }], responses: { '200': { $ref: '#/components/responses/List' }, '400': { $ref: '#/components/responses/InvalidQuery' } } }
     post: { tags: [Administration], operationId: createNotification, requestBody: { $ref: '#/components/requestBodies/ResourceWrite' }, responses: { '201': { $ref: '#/components/responses/Success' } } }
   /notifications/{id}:
     get: { tags: [Administration], operationId: getNotification, parameters: [{ $ref: '#/components/parameters/ID' }], responses: { '200': { $ref: '#/components/responses/Success' } } }
     put: { tags: [Administration], operationId: updateNotification, parameters: [{ $ref: '#/components/parameters/ID' }], requestBody: { $ref: '#/components/requestBodies/ResourceWrite' }, responses: { '200': { $ref: '#/components/responses/Success' } } }
     delete: { tags: [Administration], operationId: deleteNotification, parameters: [{ $ref: '#/components/parameters/ID' }], responses: { '204': { description: 삭제 완료 } } }
   /costs:
-    get: { tags: [Administration], operationId: listCosts, parameters: [{ $ref: '#/components/parameters/Sort' }, { $ref: '#/components/parameters/SortOrder' }], responses: { '200': { $ref: '#/components/responses/List' } } }
+    get: { tags: [Administration], operationId: listCosts, parameters: [{ $ref: '#/components/parameters/Sort' }, { $ref: '#/components/parameters/SortOrder' }], responses: { '200': { $ref: '#/components/responses/List' }, '400': { $ref: '#/components/responses/InvalidQuery' } } }
     post: { tags: [Administration], operationId: createCost, requestBody: { $ref: '#/components/requestBodies/ResourceWrite' }, responses: { '201': { $ref: '#/components/responses/Success' } } }
   /costs/{id}:
     get: { tags: [Administration], operationId: getCost, parameters: [{ $ref: '#/components/parameters/ID' }], responses: { '200': { $ref: '#/components/responses/Success' } } }
@@ -1016,6 +1034,13 @@ components:
                   total: { type: integer }
     Error:
       description: 오류
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    InvalidQuery:
+      description: >-
+        정수가 아니거나 음수인 page·page_size·limit·hub_id (code: invalid_query).
+        비어 있으면 기본값, 0과 상한을 넘는 값은 서버가 보정한다.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
