@@ -420,7 +420,11 @@ func (s *Server) usageConsumption(w http.ResponseWriter, r *http.Request) {
 		apiError(w, r, http.StatusBadRequest, "invalid_range", err.Error())
 		return
 	}
-	items, err := s.Store.ResourceConsumption(r.Context(), from, to, r.URL.Query().Get("group_by"), queryInt(r, "limit", 100))
+	limit, ok := queryIntOrReject(w, r, "limit", 100)
+	if !ok {
+		return
+	}
+	items, err := s.Store.ResourceConsumption(r.Context(), from, to, r.URL.Query().Get("group_by"), limit)
 	if err != nil {
 		handleStoreError(w, r, err)
 		return
@@ -1225,7 +1229,15 @@ func (s *Server) managedUsers(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	items, page, err := s.Store.ListManagedUsersWithAccess(r.Context(), queryInt(r, "page", 1), queryInt(r, "page_size", 20), int64(queryInt(r, "hub_id", 0)), r.URL.Query().Get("search"), access, listSort(r))
+	pageNo, pageSize, ok := pageQuery(w, r, 20)
+	if !ok {
+		return
+	}
+	hubID, ok := queryIntOrReject(w, r, "hub_id", 0)
+	if !ok {
+		return
+	}
+	items, page, err := s.Store.ListManagedUsersWithAccess(r.Context(), pageNo, pageSize, int64(hubID), r.URL.Query().Get("search"), access, listSort(r))
 	if err != nil {
 		handleStoreError(w, r, err)
 		return
@@ -1285,7 +1297,11 @@ func boundedUserDetailQueryInt(r *http.Request, name string, fallback, min, max 
 	return value, nil
 }
 func (s *Server) localUsers(w http.ResponseWriter, r *http.Request) {
-	items, page, err := s.Store.ListLocalUsers(r.Context(), queryInt(r, "page", 1), queryInt(r, "page_size", 20), r.URL.Query().Get("search"))
+	pageNo, pageSize, ok := pageQuery(w, r, 20)
+	if !ok {
+		return
+	}
+	items, page, err := s.Store.ListLocalUsers(r.Context(), pageNo, pageSize, r.URL.Query().Get("search"))
 	if err != nil {
 		handleStoreError(w, r, err)
 		return
@@ -1297,7 +1313,15 @@ func (s *Server) servers(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	items, page, err := s.Store.ListServersWithAccess(r.Context(), queryInt(r, "page", 1), queryInt(r, "page_size", 20), int64(queryInt(r, "hub_id", 0)), r.URL.Query().Get("status"), r.URL.Query().Get("search"), access, listSort(r))
+	pageNo, pageSize, ok := pageQuery(w, r, 20)
+	if !ok {
+		return
+	}
+	hubID, ok := queryIntOrReject(w, r, "hub_id", 0)
+	if !ok {
+		return
+	}
+	items, page, err := s.Store.ListServersWithAccess(r.Context(), pageNo, pageSize, int64(hubID), r.URL.Query().Get("status"), r.URL.Query().Get("search"), access, listSort(r))
 	if err != nil {
 		handleStoreError(w, r, err)
 		return
@@ -1623,7 +1647,11 @@ func requireInteractiveKeyManagement(w http.ResponseWriter, r *http.Request) boo
 }
 
 func (s *Server) auditList(w http.ResponseWriter, r *http.Request) {
-	items, page, err := s.Store.ListAudit(r.Context(), queryInt(r, "page", 1), queryInt(r, "page_size", 50), listSort(r))
+	pageNo, pageSize, ok := pageQuery(w, r, 50)
+	if !ok {
+		return
+	}
+	items, page, err := s.Store.ListAudit(r.Context(), pageNo, pageSize, listSort(r))
 	if err != nil {
 		handleStoreError(w, r, err)
 		return
@@ -1638,7 +1666,11 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	metric := r.URL.Query().Get("metric")
-	items, gpuBlocked, err := s.Store.Metrics(r.Context(), from, to, metric, queryInt(r, "limit", 1000))
+	limit, ok := queryIntOrReject(w, r, "limit", 1000)
+	if !ok {
+		return
+	}
+	items, gpuBlocked, err := s.Store.Metrics(r.Context(), from, to, metric, limit)
 	if err != nil {
 		handleStoreError(w, r, err)
 		return

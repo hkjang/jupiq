@@ -112,6 +112,10 @@ func TestScopedRBACHTTPFailClosedIntegration(t *testing.T) {
 	if response = request(http.MethodGet, "/api/v1/servers?page=1&page_size=1&search="+marker, ""); response.Code != http.StatusOK || !strings.Contains(response.Body.String(), marker+"-allowed-user") || strings.Contains(response.Body.String(), marker+"-denied-user") || !strings.Contains(response.Body.String(), `"total":1`) {
 		t.Fatalf("server HTTP pagination was not scope-filtered: status=%d body=%s", response.Code, response.Body.String())
 	}
+	// 같은 프로덕션 배선에서 정수가 아닌 page는 store에 닿기 전에 400 invalid_query다.
+	if response = request(http.MethodGet, "/api/v1/servers?page=abc&search="+marker, ""); response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"invalid_query"`) {
+		t.Fatalf("malformed page was not rejected through Handler(): status=%d body=%s", response.Code, response.Body.String())
+	}
 	if response = request(http.MethodPost, fmt.Sprintf("/api/v1/servers/%d/stop", deniedServerID), ""); response.Code != http.StatusForbidden {
 		t.Fatalf("unassigned server action was not denied: status=%d body=%s", response.Code, response.Body.String())
 	}

@@ -77,12 +77,45 @@ func intPath(r *http.Request, name string) (int64, error) {
 	return id, nil
 }
 
-func queryInt(r *http.Request, name string, fallback int) int {
-	value, err := strconv.Atoi(r.URL.Query().Get(name))
-	if err != nil {
-		return fallback
+// queryInt reads an optional non-negative integer query parameter. Empty means
+// "not given" and yields fallback; anything that is not a base-10 integer, or
+// is negative, is an error so a typo like hub_id=abc is reported instead of
+// silently widening the query to "every Hub". Zero and values above an
+// endpoint's ceiling pass through unchanged for the store to clamp
+// (pageBounds, Metrics 5000, ResourceConsumption 500).
+func queryInt(r *http.Request, name string, fallback int) (int, error) {
+	raw := r.URL.Query().Get(name)
+	if raw == "" {
+		return fallback, nil
 	}
-	return value
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 0 {
+		return 0, fmt.Errorf("%s은(는) 0 이상의 정수여야 합니다", name)
+	}
+	return value, nil
+}
+
+// queryIntOrReject is queryInt for handlers: a malformed value is answered
+// with 400 invalid_query on the spot and ok=false tells the caller to return.
+func queryIntOrReject(w http.ResponseWriter, r *http.Request, name string, fallback int) (int, bool) {
+	value, err := queryInt(r, name, fallback)
+	if err != nil {
+		apiError(w, r, http.StatusBadRequest, "invalid_query", err.Error())
+		return 0, false
+	}
+	return value, true
+}
+
+// pageQuery reads page and page_size for list handlers; either being
+// malformed answers 400 invalid_query and returns ok=false.
+func pageQuery(w http.ResponseWriter, r *http.Request, defaultSize int) (page, size int, ok bool) {
+	if page, ok = queryIntOrReject(w, r, "page", 1); !ok {
+		return 0, 0, false
+	}
+	if size, ok = queryIntOrReject(w, r, "page_size", defaultSize); !ok {
+		return 0, 0, false
+	}
+	return page, size, true
 }
 
 func principal(r *http.Request) auth.Principal {
