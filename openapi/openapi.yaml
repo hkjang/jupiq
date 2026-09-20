@@ -114,7 +114,7 @@ paths:
           required: false
           schema: { type: string, enum: [none] }
       responses:
-        '302': { description: Keycloak authorization endpoint로 이동. IP별 상한을 넘으면 /login?sso=limited로 이동 }
+        '302': { description: 'Keycloak authorization endpoint로 이동. IP별 상한을 넘으면 /login?sso=limited로 이동' }
   /auth/oidc/callback:
     get:
       security: []
@@ -131,7 +131,7 @@ paths:
         - { name: state, in: query, required: false, schema: { type: string } }
         - { name: error, in: query, required: false, schema: { type: string } }
       responses:
-        '302': { description: 세션 쿠키 발급 후 return_to 화면으로 이동, 제공자 오류면 /login?sso=… 으로 이동 }
+        '302': { description: '세션 쿠키 발급 후 return_to 화면으로 이동, 제공자 오류면 /login?sso=… 으로 이동' }
         '400': { $ref: '#/components/responses/Error' }
         '401': { $ref: '#/components/responses/Error' }
   /features:
