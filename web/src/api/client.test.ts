@@ -39,4 +39,71 @@ describe('API client', () => {
     await streamAI({ messages: [{ role: 'user', content: '인사' }] }, (chunk) => chunks.push(chunk))
     expect(chunks).toEqual(['안녕', '하세요'])
   })
+
+  it.each([
+    ['event: error\ndata: provider failed\n\n', 'provider failed'],
+    ['data: {"error":"provider failed"}\n\n', 'provider failed'],
+    ['data: {"error":{"message":"provider failed"}}\n\n', 'provider failed'],
+  ])('EOF 전 오류를 취소하고 잠금을 해제한다: %s', async (event, message) => {
+    const cancel = vi.fn()
+    const body = new ReadableStream({
+      start(controller) { controller.enqueue(new TextEncoder().encode(event)) },
+      cancel,
+    })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body)))
+
+    await expect(streamAI({}, vi.fn())).rejects.toMatchObject({ name: 'ApiError', message, status: 502 })
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(body.locked).toBe(false)
+  })
+
+  it('취소 실패가 원래 공급자 오류를 덮어쓰지 않고 잠금을 해제한다', async () => {
+    const cancel = vi.fn().mockRejectedValue(new Error('cancel failed'))
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('event: error\ndata: provider failed\n\n'))
+      },
+      cancel,
+    })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body)))
+
+    await expect(streamAI({}, vi.fn())).rejects.toMatchObject({ name: 'ApiError', message: 'provider failed', status: 502 })
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(body.locked).toBe(false)
+  })
+
+  it.each([new Error('read failed'), new DOMException('aborted', 'AbortError')])(
+    '읽기 실패 원본을 유지하고 잠금을 해제한다: %s', async (error) => {
+      const body = new ReadableStream({
+        pull(controller) { controller.error(error) },
+      })
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body)))
+
+      await expect(streamAI({}, vi.fn())).rejects.toBe(error)
+      expect(body.locked).toBe(false)
+    },
+  )
+
+  it('UTF-8 분할 청크와 DONE 뒤 마지막 버퍼를 출력하고 정상 EOF에서 잠금을 해제한다', async () => {
+    const encoded = new TextEncoder().encode(
+      'data: {"delta":"안녕"}\n\ndata: [DONE]\n\ndata: {"delta":"끝"}',
+    )
+    let offset = 0
+    const cancel = vi.fn()
+    const body = new ReadableStream({
+      pull(controller) {
+        if (offset < encoded.length) controller.enqueue(encoded.slice(offset, ++offset))
+        else controller.close()
+      },
+      cancel,
+    })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(body)))
+    const chunks: string[] = []
+
+    await streamAI({}, (chunk) => chunks.push(chunk))
+    expect(chunks).toEqual(['안녕', '끝'])
+    expect(cancel).not.toHaveBeenCalled()
+    expect(body.locked).toBe(false)
+  })
+
 })
