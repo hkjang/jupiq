@@ -156,18 +156,29 @@ export async function streamAI(
   if (!response.body) throw new ApiError('스트리밍 응답을 읽을 수 없습니다.', 0)
 
   const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-  while (true) {
-    const { value, done } = await reader.read()
-    if (done) {
-      buffer += decoder.decode()
-      break
+  try {
+    const decoder = new TextDecoder()
+    let buffer = ''
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) {
+        buffer += decoder.decode()
+        break
+      }
+      buffer += decoder.decode(value, { stream: true })
+      const events = buffer.split(/\r?\n\r?\n/)
+      buffer = events.pop() || ''
+      for (const event of events) consumeAIEvent(event, onChunk)
     }
-    buffer += decoder.decode(value, { stream: true })
-    const events = buffer.split(/\r?\n\r?\n/)
-    buffer = events.pop() || ''
-    for (const event of events) consumeAIEvent(event, onChunk)
+    if (buffer.trim()) consumeAIEvent(buffer, onChunk)
+  } catch (error) {
+    try {
+      await reader.cancel()
+    } catch {
+      // Cleanup must not replace the original stream error.
+    }
+    throw error
+  } finally {
+    reader.releaseLock()
   }
-  if (buffer.trim()) consumeAIEvent(buffer, onChunk)
 }
