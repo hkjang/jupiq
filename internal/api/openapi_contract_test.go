@@ -1,12 +1,15 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // openapi.yaml의 servers 항목이 선언한 접두사. 문서의 경로는 여기에 상대적이다.
@@ -62,9 +65,9 @@ func registeredRoutes(t *testing.T) map[string]bool {
 // 경로 키는 두 칸, 메서드 키는 네 칸 들여쓰기라는 문서 규칙만 사용한다.
 func specOperations(t *testing.T) map[string]bool {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("..", "..", "openapi", "openapi.yaml"))
+	raw, err := readOpenAPIDocument(filepath.Join("..", "..", "openapi", "openapi.yaml"))
 	if err != nil {
-		t.Fatalf("openapi.yaml을 읽을 수 없습니다: %v", err)
+		t.Fatalf("openapi.yaml을 읽거나 파싱할 수 없습니다: %v", err)
 	}
 	methods := map[string]bool{"get": true, "post": true, "put": true, "patch": true, "delete": true}
 	operations := map[string]bool{}
@@ -141,5 +144,56 @@ func TestUndocumentedRouteExceptionsStayCurrent(t *testing.T) {
 		if spec[route] {
 			t.Errorf("%s는 이제 openapi.yaml에 있으므로 undocumentedRoutes에서 지우세요", route)
 		}
+	}
+}
+
+// readOpenAPIDocument는 경로 비교 전에 문서 전체의 YAML 구문을 검사한다.
+// OpenAPI 스키마의 의미 유효성은 검사하지 않는다.
+func readOpenAPIDocument(filename string) ([]byte, error) {
+	raw, err := os.ReadFile(filename)
+	if err != nil {
+		return nil, err
+	}
+	var document any
+	if err := yaml.Unmarshal(raw, &document); err != nil {
+		return nil, fmt.Errorf("%s: %w", filename, err)
+	}
+	return raw, nil
+}
+
+func TestOpenAPIDocumentYAMLSyntax(t *testing.T) {
+	raw, err := readOpenAPIDocument(filepath.Join("..", "..", "openapi", "openapi.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 695591e에서 인용한 실제 설명을 다시 인용 없이 넣어 과거 오류를 재현한다.
+	const description = "Keycloak authorization endpoint로 이동. IP별 상한을 넘으면 /login?sso=limited로 이동"
+	const quoted = "{ description: '" + description + "' }"
+	if strings.Count(string(raw), quoted) != 1 {
+		t.Fatal("회귀 입력에 사용할 OIDC 설명을 정확히 하나 찾지 못했습니다")
+	}
+	if strings.Count(string(raw), "components:\n") != 1 {
+		t.Fatal("회귀 입력에 사용할 components 블록을 정확히 하나 찾지 못했습니다")
+	}
+	for _, tc := range []struct {
+		name     string
+		document string
+		wantErr  bool
+	}{
+		{"quoted_description", string(raw), false},
+		{"unquoted_login_description", strings.Replace(string(raw), quoted, "{ description: "+description+" }", 1), true},
+		{"unclosed_flow_mapping", strings.Replace(string(raw), quoted, "{ description: '"+description+"'", 1), true},
+		{"invalid_components", strings.Replace(string(raw), "components:\n", "components:\n  broken: { description: [ }\n", 1), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			filename := filepath.Join(t.TempDir(), "openapi.yaml")
+			if err := os.WriteFile(filename, []byte(tc.document), 0600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := readOpenAPIDocument(filename)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("readOpenAPIDocument() error = %v, wantErr = %v", err, tc.wantErr)
+			}
+		})
 	}
 }
