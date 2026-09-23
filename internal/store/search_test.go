@@ -11,6 +11,29 @@ func TestSearchPatternEscapesLikeMetacharacters(t *testing.T) {
 	}
 }
 
+func TestSearchPatternHandlesListFilterInputs(t *testing.T) {
+	cases := []struct {
+		name  string
+		query string
+		want  string
+	}{
+		{"empty", "", "%%"},
+		{"whitespace only", "   ", "%%"},
+		{"underscore", "hong_gildong", `%hong\_gildong%`},
+		{"percent", "50%", `%50\%%`},
+		{"backslash", `back\slash`, `%back\\slash%`},
+		{"all metacharacters", `\%_`, `%\\\%\_%`},
+		{"korean with inner space", " 업무망 분석 ", "%업무망 분석%"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := searchPattern(tc.query); got != tc.want {
+				t.Fatalf("searchPattern(%q)=%q want %q", tc.query, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestSearchResultPathsEncodeUntrustedNames(t *testing.T) {
 	if got, want := "/users/"+url.PathEscape("team/user #1"), "/users/team%2Fuser%20%231"; got != want {
 		t.Fatalf("user path=%q want %q", got, want)

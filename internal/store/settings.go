@@ -544,13 +544,14 @@ func (s *Store) GetResource(ctx context.Context, kind string, id int64) (Resourc
 
 func (s *Store) ListResources(ctx context.Context, kind string, page, pageSize int, status, search string, ownerID *int64, sort Sort) ([]Resource, Page, error) {
 	page, pageSize, offset := pageBounds(page, pageSize)
-	pattern := "%" + search + "%"
+	search = strings.TrimSpace(search)
+	pattern := searchPattern(search)
 	var total int
-	err := s.Pool.QueryRow(ctx, `SELECT count(*) FROM resources WHERE kind=$1 AND ($2='' OR status=$2) AND ($3='' OR name ILIKE $4) AND ($5::bigint IS NULL OR owner_user_id=$5)`, kind, status, search, pattern, ownerID).Scan(&total)
+	err := s.Pool.QueryRow(ctx, `SELECT count(*) FROM resources WHERE kind=$1 AND ($2='' OR status=$2) AND ($3='' OR name ILIKE $4 ESCAPE '\') AND ($5::bigint IS NULL OR owner_user_id=$5)`, kind, status, search, pattern, ownerID).Scan(&total)
 	if err != nil {
 		return nil, Page{}, err
 	}
-	rows, err := s.Pool.Query(ctx, `SELECT id,kind,name,status,owner_user_id,data,created_by,updated_by,created_at,updated_at FROM resources WHERE kind=$1 AND ($2='' OR status=$2) AND ($3='' OR name ILIKE $4) AND ($5::bigint IS NULL OR owner_user_id=$5) ORDER BY `+orderBy(resourceSortColumns, sort, "updated_at DESC", "id")+` LIMIT $6 OFFSET $7`, kind, status, search, pattern, ownerID, pageSize, offset)
+	rows, err := s.Pool.Query(ctx, `SELECT id,kind,name,status,owner_user_id,data,created_by,updated_by,created_at,updated_at FROM resources WHERE kind=$1 AND ($2='' OR status=$2) AND ($3='' OR name ILIKE $4 ESCAPE '\') AND ($5::bigint IS NULL OR owner_user_id=$5) ORDER BY `+orderBy(resourceSortColumns, sort, "updated_at DESC", "id")+` LIMIT $6 OFFSET $7`, kind, status, search, pattern, ownerID, pageSize, offset)
 	if err != nil {
 		return nil, Page{}, err
 	}
