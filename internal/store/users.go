@@ -139,12 +139,13 @@ func containsFold(values []string, candidate string) bool {
 
 func (s *Store) ListLocalUsers(ctx context.Context, page, pageSize int, search string) ([]User, Page, error) {
 	page, pageSize, offset := pageBounds(page, pageSize)
-	pattern := "%" + search + "%"
+	search = strings.TrimSpace(search)
+	pattern := searchPattern(search)
 	var total int
-	if err := s.Pool.QueryRow(ctx, `SELECT count(*) FROM users WHERE $1='' OR username ILIKE $2 OR display_name ILIKE $2 OR email ILIKE $2`, search, pattern).Scan(&total); err != nil {
+	if err := s.Pool.QueryRow(ctx, `SELECT count(*) FROM users WHERE $1='' OR username ILIKE $2 ESCAPE '\' OR display_name ILIKE $2 ESCAPE '\' OR email ILIKE $2 ESCAPE '\'`, search, pattern).Scan(&total); err != nil {
 		return nil, Page{}, err
 	}
-	rows, err := s.Pool.Query(ctx, `SELECT `+userColumns+` FROM users WHERE $1='' OR username ILIKE $2 OR display_name ILIKE $2 OR email ILIKE $2 ORDER BY username LIMIT $3 OFFSET $4`, search, pattern, pageSize, offset)
+	rows, err := s.Pool.Query(ctx, `SELECT `+userColumns+` FROM users WHERE $1='' OR username ILIKE $2 ESCAPE '\' OR display_name ILIKE $2 ESCAPE '\' OR email ILIKE $2 ESCAPE '\' ORDER BY username LIMIT $3 OFFSET $4`, search, pattern, pageSize, offset)
 	if err != nil {
 		return nil, Page{}, err
 	}
