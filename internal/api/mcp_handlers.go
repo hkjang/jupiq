@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"time"
+
+	"github.com/hkjang/jupiq/internal/auth"
 )
 
 type rpcRequest struct {
@@ -27,6 +29,34 @@ type rpcError struct {
 func (s *Server) registerMCP(mux router) {
 	mux.HandleFunc("POST /mcp", s.require("mcp:use", s.mcp))
 	mux.HandleFunc("POST /api/v1/mcp", s.require("mcp:use", s.mcp))
+	// RFC 9728: 거부된 MCP 클라이언트가 인증 서버를 찾는 문서. 맨 경로와
+	// 리소스 경로를 붙인 경로 둘 다에서 인증 없이 답한다.
+	mux.HandleFunc("GET "+auth.MCPResourceMetadataPath, s.mcpResourceMetadata)
+	mux.HandleFunc("GET "+auth.MCPResourceMetadataPath+"/", s.mcpResourceMetadata)
+}
+
+// mcpResourceMetadata는 보호 리소스 메타데이터를 제품의 응답 봉투가 아니라
+// 맨 JSON으로 낸다 — 읽는 쪽은 RFC 9728을 따르는 OAuth 클라이언트 라이브러리다.
+// 브라우저 안에서 도는 클라이언트도 읽으므로 CORS를 연다. 꺼져 있으면 404다:
+// 메타데이터가 있는데 토큰을 거부하면 클라이언트는 로그인 루프에 빠진다.
+func (s *Server) mcpResourceMetadata(w http.ResponseWriter, r *http.Request) {
+	settings, err := s.Auth.MCPOAuthSettings(r.Context())
+	if err != nil {
+		handleStoreError(w, r, err)
+		return
+	}
+	if !settings.Active() {
+		if settings.Config.Enabled {
+			s.Logger.Warn("mcp oauth is enabled but inactive", "reason", settings.Inactive(), "request_id", requestID(r))
+		}
+		apiError(w, r, http.StatusNotFound, "mcp_oauth_disabled", "이 서버의 MCP는 SSO 토큰을 받지 않습니다. 개인 API 키(jqk_)를 사용하세요.")
+		return
+	}
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	payload, _ := json.Marshal(settings.Metadata(r))
+	_, _ = w.Write(payload)
 }
 
 func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {

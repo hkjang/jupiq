@@ -56,7 +56,7 @@ import {
 import { NativeSelect } from '../components/NativeSelect'
 import { stableRowKey } from '../utils/rowKey'
 import { sorterFor } from '../utils/sorting'
-import { addAllowedHost, resolveOidcSettings } from '../utils/settings'
+import { DEFAULT_MCP_OAUTH_SCOPES, MCP_OAUTH_KEY, addAllowedHost, mcpMetadataUrlFor, mcpResourceFor, resolveOidcSettings } from '../utils/settings'
 import { AsyncState } from '../components/AsyncState'
 import { PageHeader } from '../components/PageHeader'
 
@@ -493,6 +493,7 @@ export function SettingsPage() {
       oidc: resolveOidcSettings(safe),
       features: { gpu_monitoring: false, llm_usage_monitoring: false, ...(safe.features as ApiRecord || {}) },
       analytics: { enabled: false, provider: 'momento', momento_proxy: true, momento_verify_tls: true, include_admin: false, placement: 'head', allowed_hosts: '', ...(safe.analytics as ApiRecord || {}) },
+      [MCP_OAUTH_KEY]: { enabled: false, resource: '', audience: [], scopes: DEFAULT_MCP_OAUTH_SCOPES, ...(safe[MCP_OAUTH_KEY] as ApiRecord || {}) },
       workflow: { approval_enabled: false, ...(safe.workflow as ApiRecord || {}) },
       ai: { streaming: true, ...(safe.ai as ApiRecord || {}) },
       prometheus: {
@@ -590,6 +591,25 @@ export function SettingsPage() {
   const integrations = (
     <Row gutter={[16, 16]}>
       <Col xs={24} xl={12}><IntegrationCard icon={<SafetyCertificateOutlined />} title="Keycloak OIDC" description="Issuer와 Client 정보만으로 SSO Discovery를 구성합니다." testType="oidc" onTest={testIntegration} testing={testing}><Form.Item name={['oidc', 'enabled']} label="SSO 사용" valuePropName="checked"><Switch /></Form.Item><Form.Item name={['oidc', 'issuer_url']} label="Issuer URL" rules={[{ type: 'url', warningOnly: true }]}><Input placeholder="https://keycloak.internal/realms/company" /></Form.Item><Form.Item name={['oidc', 'client_id']} label="Client ID"><Input /></Form.Item><Form.Item name={['oidc', 'client_secret']} label="Client Secret" extra={secretHelp}><Input.Password autoComplete="new-password" placeholder="변경할 때만 입력" /></Form.Item><Form.Item name={['oidc', 'redirect_url']} label="Redirect URL" extra="비워 두면 현재 jupiq 주소에서 자동 계산합니다."><Input /></Form.Item><Form.Item name={['oidc', 'scopes']} label="Scopes"><Select virtual={false} mode="tags" placeholder="openid, profile, email" /></Form.Item><Form.Item name={['oidc', 'username_claim']} label="사용자 ID Claim"><Input placeholder="preferred_username" /></Form.Item><Form.Item name={['oidc', 'auto_create_users']} label="최초 로그인 사용자 자동 생성" valuePropName="checked"><Switch /></Form.Item><Form.Item name={['oidc', 'auto_login']} label="자동 로그인(Silent SSO)" valuePropName="checked" extra="Keycloak에 이미 로그인한 사용자는 로그인 화면 없이 바로 들어옵니다(prompt=none). 세션이 없으면 한 탭에서 한 번만 시도하고 로그인 화면을 보여 줍니다. 기본값은 꺼짐입니다."><Switch /></Form.Item><Form.Item name={['oidc', 'verify_tls']} label="TLS 검증" valuePropName="checked"><Switch /></Form.Item></IntegrationCard></Col>
+      <Col xs={24} xl={12}><Card title={<Space><ApiOutlined />MCP SSO(OAuth)</Space>}>
+        <Typography.Paragraph type="secondary">MCP 클라이언트(Claude·Cursor 등)에 개인 키 대신 URL 하나만 주면 위 Keycloak으로 로그인해 토큰을 받아 옵니다. jupiq는 토큰을 검사만 하고 계정을 만들지 않으므로, 사용자는 먼저 웹으로 한 번 SSO 로그인해 두어야 합니다. 기본값은 꺼짐입니다.</Typography.Paragraph>
+        <Form.Item name={[MCP_OAUTH_KEY, 'enabled']} label="SSO 토큰으로 MCP 접속 허용" valuePropName="checked" extra="Keycloak OIDC의 Issuer URL이 비어 있으면 켜 두어도 동작하지 않고 이유가 서버 로그에 남습니다."><Switch checkedChildren="사용" unCheckedChildren="사용 안 함" /></Form.Item>
+        <Form.Item name={[MCP_OAUTH_KEY, 'resource']} label="리소스 식별자" extra="클라이언트가 실제로 접속하는 공개 주소 + /mcp. Keycloak Audience 매퍼에 넣는 값과 같아야 하며, 토큰의 aud와 비교되는 값은 여기 적은 값뿐입니다. 비워 두면 아래 표시 주소만 요청의 Host로 만들고 대상 검사는 허용 대상 목록만으로 합니다."><Input placeholder="https://jupiq.example.com/mcp" /></Form.Item>
+        <Form.Item noStyle shouldUpdate={(previous, current) => (previous[MCP_OAUTH_KEY] as ApiRecord | undefined)?.resource !== (current[MCP_OAUTH_KEY] as ApiRecord | undefined)?.resource}>
+          {() => {
+            const resource = mcpResourceFor(String(form.getFieldValue([MCP_OAUTH_KEY, 'resource']) || ''), window.location.origin)
+            const metadata = mcpMetadataUrlFor(resource)
+            return (
+              <Alert className="data-note" type="info" showIcon message="클라이언트에 줄 값" description={<Space direction="vertical" size={2}>
+                <span>MCP URL: <Typography.Text code copyable>{resource}</Typography.Text></span>
+                <span>메타데이터: <Typography.Text code copyable={Boolean(metadata)}>{metadata || '리소스 식별자가 URL이 아닙니다'}</Typography.Text></span>
+              </Space>} />
+            )
+          }}
+        </Form.Item>
+        <Form.Item name={[MCP_OAUTH_KEY, 'audience']} label="허용 대상(클라이언트 ID)" extra="토큰의 aud 또는 azp가 이 목록에 있으면 받습니다. Keycloak은 기본으로 aud에 account만 싣고 클라이언트 ID를 azp에 담으므로 MCP 클라이언트 ID를 여기 적으면 Audience 매퍼 없이 동작합니다."><Select virtual={false} mode="tags" placeholder="claude-mcp" /></Form.Item>
+        <Form.Item name={[MCP_OAUTH_KEY, 'scopes']} label="SSO 주체에게 주는 범위" extra="개인 API 키의 권한 어휘와 같습니다. 사용자 자신의 역할 권한과 교집합만 유효하며 토큰의 role·scope로는 올라가지 않습니다."><Select virtual={false} mode="tags" placeholder="mcp:use dashboard:read" /></Form.Item>
+      </Card></Col>
       <Col xs={24} xl={12}><IntegrationCard icon={<DatabaseOutlined />} title="Prometheus" description="메트릭 API 연결, 인증, 쿼리 권한과 응답시간을 검사합니다." testType="prometheus" onTest={testIntegration} testing={testing}><Form.Item name={['prometheus', 'enabled']} label="Prometheus 연계" valuePropName="checked"><Switch /></Form.Item><Form.Item name={['prometheus', 'base_url']} label="Prometheus URL"><Input placeholder="https://prometheus.internal" /></Form.Item><Form.Item name={['prometheus', 'bearer_token']} label="Bearer Token" extra={secretHelp}><Input.Password autoComplete="new-password" /></Form.Item><Form.Item name={['prometheus', 'verify_tls']} label="TLS 검증" valuePropName="checked"><Switch /></Form.Item><Form.Item name={['prometheus', 'queries']} label="자원 수집 PromQL(JSON)" extra="CPU·메모리 쿼리는 기본 제공하며 GPU 쿼리는 GPU 모니터링을 켠 경우에만 실행합니다."><Input.TextArea rows={7} /></Form.Item></IntegrationCard></Col>
       <Col xs={24} xl={12}><IntegrationCard icon={<GlobalOutlined />} title="Kubernetes" description="Cluster API 연결, 서비스 계정 인증과 조회 권한을 확인합니다." testType="kubernetes" onTest={testIntegration} testing={testing}><Form.Item name={['kubernetes', 'enabled']} label="Kubernetes 연계" valuePropName="checked"><Switch /></Form.Item><Form.Item name={['kubernetes', 'base_url']} label="API Server URL"><Input /></Form.Item><Form.Item name={['kubernetes', 'namespace']} label="Namespace"><Input placeholder="jupyterhub" /></Form.Item><Form.Item name={['kubernetes', 'label_selector']} label="Pod Label Selector" extra="예: component=singleuser-server"><Input /></Form.Item><Form.Item name={['kubernetes', 'pod_username_regex']} label="Pod → username 정규식" extra="비우면 LLM 사용량 설정의 정규식을 사용합니다. 입력 시 (?P&lt;username&gt;...) 캡처가 필요합니다."><Input placeholder="^jupyter-(?P<username>.+)$" /></Form.Item><Form.Item name={['kubernetes', 'bearer_token']} label="Service Account Token" extra={secretHelp}><Input.Password autoComplete="new-password" /></Form.Item><Form.Item name={['kubernetes', 'verify_tls']} label="TLS 검증" valuePropName="checked"><Switch /></Form.Item></IntegrationCard></Col>
       <Col xs={24} xl={12}><IntegrationCard icon={<RobotOutlined />} title="AI API" description="OpenAI 호환 모델 목록 API로 주소·인증·모델 접근 권한을 검사합니다. 실제 채팅은 스트리밍으로 호출합니다." testType="ai" onTest={testIntegration} testing={testing}><Form.Item name={['ai', 'enabled']} label="AI 운영 분석" valuePropName="checked"><Switch /></Form.Item><Form.Item name={['ai', 'base_url']} label="API Base URL"><Input placeholder="https://ai-api.internal/v1" /></Form.Item><Form.Item name={['ai', 'api_key']} label="API Key" extra={secretHelp}><Input.Password autoComplete="new-password" /></Form.Item><Form.Item name={['ai', 'model']} label="모델"><Input /></Form.Item><Form.Item name={['ai', 'max_tokens']} label="최대 토큰" extra="모델이 지원하는 범위에서 최대 262,144(256K)까지 설정할 수 있습니다."><InputNumber min={1} max={262144} style={{ width: '100%' }} /></Form.Item><Form.Item name={['ai', 'streaming']} label="스트리밍" valuePropName="checked"><Switch disabled checkedChildren="기본 사용" /></Form.Item><Form.Item name={['ai', 'verify_tls']} label="TLS 검증" valuePropName="checked"><Switch /></Form.Item></IntegrationCard></Col>

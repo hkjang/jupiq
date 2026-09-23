@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -34,6 +35,10 @@ type Principal struct {
 	APIKeyID        int64
 	APIKeyScopes    []string
 	UserPermissions []string
+	// OAuthScopes is set for a subject that arrived at /mcp with a Keycloak
+	// access token. It is the administrator's mcp.oauth.scopes ceiling and is
+	// held to the same intersection rule as an API key's scopes.
+	OAuthScopes []string
 }
 
 func (p Principal) Allows(permission string) bool {
@@ -115,6 +120,9 @@ func (p Principal) GlobalPermissionSet() []string {
 }
 
 func (p Principal) apiKeyAllows(permission string) bool {
+	if p.OAuthScopes != nil {
+		return len(p.OAuthScopes) > 0 && store.EnsurePermission(p.OAuthScopes, permission)
+	}
 	if p.APIKeyID == 0 {
 		return true
 	}
@@ -129,6 +137,10 @@ type Service struct {
 	Cipher *secure.Cipher
 	key    []byte
 	now    func() time.Time
+	// mcpProviders caches OIDC discovery for MCP access-token verification
+	// (mcp_oauth.go). Zero value is usable so literal Services keep working.
+	mcpMu        sync.Mutex
+	mcpProviders map[string]mcpProviderEntry
 }
 
 func NewService(s *store.Store, cipher *secure.Cipher) *Service {
@@ -195,6 +207,15 @@ func (s *Service) AuthenticateRequest(ctx context.Context, r *http.Request) (Pri
 				return Principal{}, errors.New("유효하지 않은 API 키입니다")
 			}
 			return Principal{User: user, UserPermissions: user.Permissions, APIKeyScopes: scopes, APIKeyID: keyID}, nil
+		}
+		// A JWT that jupiq did not issue can only be a Keycloak access token,
+		// and only /mcp accepts those. While MCP OAuth is off (or misconfigured)
+		// it falls through to the session check and fails exactly as before,
+		// so an installation that never turned it on says nothing new.
+		if IsMCPPath(r.URL.Path) && LooksLikeJWT(plain) && unverifiedIssuer(plain) != Issuer {
+			if settings, err := s.MCPOAuthSettings(ctx); err == nil && settings.Active() {
+				return s.authenticateMCPOAuth(ctx, r, plain, settings)
+			}
 		}
 		return s.authenticateJWT(ctx, plain)
 	}

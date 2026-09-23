@@ -728,7 +728,16 @@ paths:
     post:
       tags: [AI]
       operationId: mcpStreamableHTTP
-      description: /mcp의 /api/v1 별칭. initialize, ping, tools/list, tools/call 지원.
+      description: >-
+        /mcp의 /api/v1 별칭. initialize, ping, tools/list, tools/call 지원.
+        인증은 개인 API 키(jqk_) 또는, 관리자가 MCP SSO(mcp.oauth.enabled)를
+        켠 경우 Keycloak 액세스 토큰(Bearer JWT)이다. 토큰은 서명·발급자·만료·
+        대상(aud에 리소스 식별자, 또는 aud/azp가 허용 대상)을 검사하고 이미 웹
+        SSO로 등록된 활성 계정에만 매핑하며 권한은 mcp.oauth.scopes와 사용자
+        권한의 교집합이다. SSO가 켜진 동안 401 응답에는 WWW-Authenticate
+        (Bearer resource_metadata="…/.well-known/oauth-protected-resource/mcp")가
+        붙어 MCP 클라이언트가 스스로 로그인 흐름을 시작한다. OAuth 토큰은 이
+        경로에서만 받는다.
       requestBody:
         content:
           application/json:

@@ -18,17 +18,19 @@ const openapiServerPrefix = "/api/v1"
 // undocumentedRoutes는 OpenAPI 문서에 없는 것이 정상인 등록 경로와 그 이유다.
 // 새 경로를 추가하면서 문서를 빼먹으면 계약 테스트가 실패한다.
 var undocumentedRoutes = map[string]string{
-	"GET /":                         "SPA 정적 파일 응답",
-	"GET /healthz":                  "서버 접두사 밖의 컨테이너 liveness probe",
-	"GET /readyz":                   "서버 접두사 밖의 컨테이너 readiness probe",
-	"POST /mcp":                     "POST /api/v1/mcp와 같은 핸들러를 쓰는 MCP 별칭",
-	"GET /api/v1/openapi.yaml":      "문서 자신을 내려주는 경로",
-	"GET /api/v1/live":              "GET /api/v1/dashboard/live의 레거시 별칭",
-	"POST /api/v1/approvals":        "승인 요청은 대상 작업 API가 만들므로 항상 405",
-	"PUT /api/v1/approvals/{id}":    "승인 상태는 review·approve·reject로만 바꾸므로 항상 405",
-	"DELETE /api/v1/approvals/{id}": "감사 추적을 위해 삭제를 막으므로 항상 405",
-	"GET /momento/":                 "서버 접두사 밖의 같은 오리진 Momento 수집기 프록시(추적기 로더 GET /momento/tracker.js만 통과)",
-	"POST /momento/":                "서버 접두사 밖의 같은 오리진 Momento 수집기 프록시(수집 POST /momento/collect/*만 통과)",
+	"GET /":        "SPA 정적 파일 응답",
+	"GET /healthz": "서버 접두사 밖의 컨테이너 liveness probe",
+	"GET /readyz":  "서버 접두사 밖의 컨테이너 readiness probe",
+	"POST /mcp":    "POST /api/v1/mcp와 같은 핸들러를 쓰는 MCP 별칭",
+	"GET /.well-known/oauth-protected-resource":  "서버 접두사 밖의 RFC 9728 보호 리소스 메타데이터(MCP SSO가 켜진 동안 맨 JSON)",
+	"GET /.well-known/oauth-protected-resource/": "같은 문서의 리소스 경로 삽입 형태(…/oauth-protected-resource/mcp)",
+	"GET /api/v1/openapi.yaml":                   "문서 자신을 내려주는 경로",
+	"GET /api/v1/live":                           "GET /api/v1/dashboard/live의 레거시 별칭",
+	"POST /api/v1/approvals":                     "승인 요청은 대상 작업 API가 만들므로 항상 405",
+	"PUT /api/v1/approvals/{id}":                 "승인 상태는 review·approve·reject로만 바꾸므로 항상 405",
+	"DELETE /api/v1/approvals/{id}":              "감사 추적을 위해 삭제를 막으므로 항상 405",
+	"GET /momento/":                              "서버 접두사 밖의 같은 오리진 Momento 수집기 프록시(추적기 로더 GET /momento/tracker.js만 통과)",
+	"POST /momento/":                             "서버 접두사 밖의 같은 오리진 Momento 수집기 프록시(수집 POST /momento/collect/*만 통과)",
 }
 
 type recordingRouter struct{ patterns []string }

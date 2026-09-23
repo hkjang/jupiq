@@ -28,7 +28,7 @@ jupiq는 **컨테이너 하나**입니다. Go 서버가 REST API와 SPA를 같�
 - **밖으로 나가는 호출**: JupyterHub REST, Prometheus HTTP API, Kubernetes API, AI Provider, Webhook.
   모두 관리자가 설정한 대상에만 나갑니다.
 - **안으로 들어오는 호출**: 브라우저(HttpOnly `jupiq_session` 쿠키), 자동화(`Authorization: Bearer <JWT|jqk_…>`),
-  MCP 클라이언트(`POST /mcp`).
+  MCP 클라이언트(`POST /mcp` — 개인 키, 또는 관리자가 켠 경우 Keycloak 액세스 토큰. 4.5절).
 - **수집하지 않는 것**: Notebook 소스·셀·사용자 파일, AI 프롬프트와 응답 본문.
 
 선택 수집기가 실패해도 로그인·Hub 관리 같은 핵심 기능은 계속 동작합니다.
@@ -159,7 +159,7 @@ docker compose --env-file .env -f compose.example.yaml ps
 |---|---|
 | 기본 | 원시 메트릭 보존(일) 1~365, 기본값 30. 고정 동작 안내(서비스명·한국어 UI, 시각은 UTC 저장·지역 시각 표시) |
 | 선택 기능 | GPU 모니터링, LLM API 사용량 모니터링 스위치(둘 다 기본 OFF) |
-| 외부 연동 | Keycloak OIDC, Prometheus, Kubernetes, AI API, Webhook |
+| 외부 연동 | Keycloak OIDC, MCP SSO(OAuth — 4.5), Prometheus, Kubernetes, AI API, Webhook |
 | LLM 사용량 | 수집 소스(Prometheus 고정), Pod→username 정규식, 샘플 Pod, 수집 PromQL(JSON), 토큰 단가, stale 판정(초), LLM 사용량 보존(일) |
 | 승인 프로세스 | 검토·승인 사용, 팀장 선검토, 사유 필수, 승인 대상 요청 |
 | 보안·키 권한 | 개인 API 키 정책(회전 주기·최대 유효기간·허용 권한), 비밀값 암호화 안내, 역할·세부 권한 관리 |
@@ -365,6 +365,114 @@ API로도 같은 일을 할 수 있습니다: `GET /api/v1/analytics/violations`
 주소만으로 이 흐름을 켤 수는 없습니다. 콜백·로그인·API·MCP·probe 경로에서는 시도하지 않으며,
 이미 세션이 있는 사람에게도 아무 일이 일어나지 않습니다.
 
+### 4.5 MCP를 SSO 토큰으로 열기(MCP OAuth)
+
+`/mcp`는 기본으로 개인 API 키(`jqk_`)로만 들어갑니다. `외부 연동 → MCP SSO(OAuth)` 카드를 켜면
+**같은 Keycloak이 발급한 액세스 토큰**으로도 들어갈 수 있습니다. MCP 인가 규격(2025-06-18 이후)은
+OAuth 2.1이라, 켜 두면 Claude·Cursor 같은 MCP 클라이언트에 URL 하나만 주면 됩니다 — 클라이언트가
+jupiq의 401 응답에서 메타데이터 주소를 읽고, Keycloak 로그인 창을 띄우고, 토큰을 받아 옵니다.
+키 체계는 그대로이므로 폐쇄망·자동화 스크립트는 계속 키를 씁니다.
+
+jupiq는 **리소스 서버**입니다. 로그인 화면·토큰 발급·클라이언트 등록은 Keycloak이 하고, jupiq는
+받은 토큰을 요청마다 검사만 합니다(토큰을 저장하거나 세션으로 바꾸지 않습니다). 세 가지 규칙이
+전부입니다.
+
+- **계정을 만들지 않습니다.** 토큰의 `sub`로 **이미 웹 SSO 로그인으로 등록된 활성 계정**만 찾습니다.
+  없으면 `먼저 웹으로 한 번 로그인하세요`로 거부합니다. 정지된 계정이 MCP로 되살아나거나 토큰의
+  role claim으로 관리자가 되는 일은 없습니다.
+- **권한은 키보다 넓지 않습니다.** SSO 주체는 그 사용자가 키를 만들어 들어왔을 때와 같은 문을
+  지납니다. 범위는 토큰의 `scope`가 아니라 관리자 설정 `SSO 주체에게 주는 범위`가 정하고, 사용자
+  자신의 역할 권한과의 **교집합**만 유효합니다.
+- **`/mcp`(와 별칭 `/api/v1/mcp`)에서만** 받습니다. REST·관리 API는 지금처럼 키와 세션만 받습니다.
+
+#### 설정
+
+| 항목(설정 키) | 기본값 | 뜻 |
+|---|---|---|
+| SSO 토큰으로 MCP 접속 허용(`mcp.oauth.enabled`) | 꺼짐 | 켜도 `Keycloak OIDC`의 Issuer URL이 비어 있으면 꺼진 것처럼 동작하고 이유가 로그(`mcp oauth is enabled but inactive`)에 남습니다 |
+| 리소스 식별자(`mcp.oauth.resource`) | 빈 값 | 클라이언트가 실제로 접속하는 **공개 주소 + `/mcp`**(예 `https://jupiq.example.com/mcp`). 토큰의 `aud`와 문자 그대로 비교되는 값은 **여기 적은 값뿐**입니다. 비우면 메타데이터·401 응답에 보이는 주소만 요청의 Host로 만들고(누구나 바꿀 수 있는 헤더이므로 대상 검사에는 쓰지 않음), 대상 검사는 `허용 대상` 목록만으로 합니다 — Audience 매퍼 경로를 쓰거나 리버스 프록시 뒤라면 **반드시 적으세요** |
+| 허용 대상(`mcp.oauth.audience`) | 빈 목록 | 토큰의 `aud` 또는 `azp`가 이 목록에 있으면 받습니다. 보통 MCP 클라이언트 ID를 적습니다 |
+| SSO 주체에게 주는 범위(`mcp.oauth.scopes`) | `mcp:use dashboard:read hubs:read servers:read usage:read` | 개인 키와 같은 권한 어휘. MCP 도구 넷이 요구하는 읽기 권한이 기본입니다 |
+| (재사용) Issuer URL·TLS 검증 | `Keycloak OIDC` 카드 | 토큰의 `iss`와 서명 키(JWKS)를 이 발급자에서 가져옵니다. 새로 만들지 않습니다 |
+
+카드 아래의 **클라이언트에 줄 값**(MCP URL, 메타데이터 주소)을 복사해 사용자에게 주면 됩니다.
+
+#### 토큰을 어떻게 검사하는가
+
+| 항목 | 규칙 |
+|---|---|
+| 서명 | Issuer의 JWKS. RS·ES·PS 계열만. `HS*`·`none` 거부 |
+| `iss` | `Keycloak OIDC`의 Issuer URL과 같아야 함 |
+| `exp`·`nbf` | 만료·아직 유효하지 않음 거부 |
+| `typ` | `ID`면 거부. ID 토큰은 로그인 증거지 API 자격이 아님 |
+| `cnf` | 있으면 거부(DPoP·mTLS로 묶인 토큰은 검증할 수 없음) |
+| `sub` | 비어 있으면 거부 |
+| 대상 | 아래 둘 중 하나 |
+
+**대상 검사**가 핵심입니다. 다른 앱에 로그인해 받은 토큰이 jupiq의 `/mcp`를 열어서는 안 되므로, 둘
+중 하나는 맞아야 합니다.
+
+1. `aud`에 리소스 식별자가 있다 — Keycloak에 Audience 매퍼를 둔 정식 경로. `mcp.oauth.resource`가 비어
+   있으면 이 경로는 없습니다(요청의 Host로 만든 주소는 비교하지 않음).
+2. `aud` 또는 `azp`가 `허용 대상`에 있다 — 매퍼 없이 쓰는 호환 경로. **실제 Keycloak 26은 `aud`에
+   `account`만 싣고 클라이언트 ID는 `azp`에 담으므로**, MCP 클라이언트 ID를 허용 대상에 적으면
+   매퍼 없이 동작합니다.
+
+거부할 때는 본 값과 고칠 값을 메시지에 넣습니다(아래 표). 운영자는 그 메시지 하나로 설정을 끝낼 수
+있습니다.
+
+#### Keycloak 쪽 할 일
+
+1. MCP 클라이언트용 **공개(public) 클라이언트**를 만듭니다(예 `claude-mcp`). Standard Flow 켬, PKCE
+   `S256`, Direct Access Grants·Implicit·Service accounts 끔. 웹 로그인 클라이언트와 **다른**
+   클라이언트입니다.
+2. Valid Redirect URIs에 쓰는 MCP 클라이언트의 콜백을 정확히 적습니다(Claude는
+   `https://claude.ai/api/mcp/auth_callback`, 로컬 클라이언트는 `http://127.0.0.1:*/callback` 류).
+   `*` 하나로 다 여는 것은 금지입니다.
+3. 정식 경로: 그 클라이언트(또는 전용 client scope)에 **Audience 매퍼** — Included Custom Audience =
+   리소스 식별자, Add to access token 켬, Add to ID token 끔. 호환 경로: 매퍼 없이 jupiq의 `허용 대상`에
+   클라이언트 ID를 적습니다.
+4. 액세스 토큰 수명은 짧게(5분 안팎). jupiq는 introspection을 하지 않으므로 **Keycloak에서 로그아웃해도
+   이미 발급된 토큰은 만료까지 삽니다.** 계정을 즉시 막아야 하면 jupiq에서 계정을 비활성화하세요 —
+   검사는 요청마다 하므로 즉시 반영됩니다.
+
+#### 확인하는 방법
+
+```bash
+# 1) 메타데이터: 인증 없이 맨 JSON. 꺼져 있으면 404
+curl -s https://jupiq.example.com/.well-known/oauth-protected-resource/mcp
+# {"resource":"https://jupiq.example.com/mcp","authorization_servers":["https://keycloak.example.com/realms/corp"],
+#  "bearer_methods_supported":["header"],"scopes_supported":["mcp:use",...],"resource_name":"jupiq MCP"}
+
+# 2) 토큰 없는 /mcp: 401에 길잡이 헤더. REST 401에는 붙지 않는다
+curl -si -X POST https://jupiq.example.com/mcp -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | grep -i www-authenticate
+# WWW-Authenticate: Bearer realm="jupiq", resource_metadata="https://jupiq.example.com/.well-known/oauth-protected-resource/mcp"
+
+# 3) 토큰으로 tools/list (토큰은 Keycloak에서 MCP 클라이언트로 받은 액세스 토큰)
+curl -s -X POST https://jupiq.example.com/mcp -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
+가장 확실한 확인은 실제 MCP 클라이언트에 MCP URL만 넣어 연결해 보는 것입니다.
+
+#### 거부 메시지별 조치
+
+| 메시지 | 조치 |
+|---|---|
+| `SSO 토큰이 이 서버를 위해 발급된 것이 아닙니다(aud=[account], azp="claude-mcp") …` | 메시지의 `azp` 값을 `허용 대상`에 적거나, Keycloak 클라이언트의 Audience 매퍼에 메시지의 리소스 식별자를 넣습니다. 리소스 식별자가 프록시 뒤의 내부 주소로 나오면 `리소스 식별자`를 공개 주소로 적으세요 |
+| `이 SSO 계정은 jupiq에 등록되지 않았거나 비활성입니다. 먼저 웹으로 한 번 로그인하세요.` | 사용자가 jupiq 웹에 SSO로 한 번 로그인하면 등록됩니다(`최초 로그인 사용자 자동 생성`이 켜져 있어야 함). 계정이 있는데도 나오면 `통합 사용자`에서 활성 여부와 인증 출처(`oidc`)를 확인 |
+| `SSO 액세스 토큰이 유효하지 않습니다(서명·발급자·만료)` | 서명·발급자·만료·nbf 중 무엇이 실패했는지는 컨테이너 로그의 `mcp oauth token refused` 항목의 `reason`에 남습니다. 대개 만료(토큰 수명 5분)거나 Issuer URL이 Keycloak realm 주소와 다른 경우(끝의 `/`까지 정확히) |
+| `SSO ID 토큰은 MCP 자격이 아닙니다` | 클라이언트가 ID 토큰을 보냈습니다. 액세스 토큰을 보내도록 설정 |
+| `소지자 증명(cnf)이 묶인 SSO 토큰은 받지 않습니다` | 클라이언트 또는 realm의 DPoP/mTLS 바인딩을 끄고 일반 Bearer 토큰을 발급받게 합니다 |
+| `Keycloak 발급자 정보를 읽지 못해 SSO 토큰을 확인할 수 없습니다` | jupiq에서 Keycloak Discovery(`/.well-known/openid-configuration`)에 닿지 못합니다. 망·TLS(`TLS 검증`)·Issuer URL 확인 |
+| `세션이 만료되었거나 유효하지 않습니다`(토큰을 보냈는데) | MCP SSO가 꺼져 있거나 Issuer URL이 비어 있습니다. 켜져 있지 않은 설치는 토큰에 대해 새로운 말을 하지 않습니다 |
+| `이 MCP 도구를 실행할 세부 권한이 없습니다` | 도구가 요구하는 권한(`dashboard:read`·`hubs:read`·`servers:read`·`usage:read`)이 `SSO 주체에게 주는 범위`와 사용자 역할 **둘 다**에 있어야 합니다 |
+
+메타데이터 문서는 켜져 있을 때만 존재합니다(꺼지면 404). 문서가 있는데 토큰을 거부하면 클라이언트가
+로그인 루프에 빠지므로, 끌 때는 스위치만 끄면 됩니다. Discovery 결과는 issuer별로 10분 재사용하고
+서명 키는 모르는 `kid`가 오면 다시 받아 오므로 Keycloak 키 회전에 따로 할 일은 없습니다.
+
 ---
 
 ## 5. 운영
@@ -519,6 +627,8 @@ GPU·LLM 화면 자체가 없다면 장애가 아니라 `선택 기능` 스위�
 | 로그인 화면에 `SSO 로그인이 완료되지 않았습니다` 안내 | Keycloak이 `login_required` 외의 오류(예: `access_denied`, `interaction_required`)를 돌려줌. 컨테이너 로그의 `OIDC provider returned an error` 항목에서 오류 코드 확인 |
 | 로그인 화면에 `SSO 로그인 요청이 너무 많습니다` 안내 | 같은 IP에서 1분 안에 `GET /api/v1/auth/oidc/login`이 120회를 넘음. 리버스 프록시 뒤라면 모든 사용자가 프록시 주소 하나로 합산되므로, 배포 직후 동시 접속이나 반복 호출하는 클라이언트가 있는지 확인. 1분 뒤 자동 해제 |
 | 모든 관리자가 잠김 | Bootstrap 계정으로 로그인. 마지막 최고 관리자 할당은 서비스가 보호하므로 완전히 잠기지는 않습니다 |
+| MCP 클라이언트가 SSO 로그인 창을 띄우지 않고 401만 받음 | `외부 연동 → MCP SSO(OAuth)`가 꺼져 있거나 Issuer URL이 비어 있음. `curl …/.well-known/oauth-protected-resource/mcp`가 404면 그 경우(4.5절) |
+| MCP 클라이언트가 로그인은 되는데 `발급된 것이 아닙니다`로 거부됨 | 메시지의 `azp`를 허용 대상에 적거나 Audience 매퍼 추가. 거부 메시지별 조치는 4.5절 |
 
 ### 6.5 서버 제어가 실행되지 않는다
 
@@ -568,7 +678,8 @@ Keycloak OIDC는 `외부 연동` 탭에서 Issuer URL, Client ID·Secret, Redire
 최초 로그인 사용자 자동 생성, 자동 로그인(Silent SSO, 기본 꺼짐 — 동작은 4.4절), TLS 검증을 설정합니다. `연결 테스트`는 Discovery 문서와 endpoint 존재까지
 검증하며, authorization code·PKCE·ID token claim 검증은 저장 후 실제 로그인으로 확인해야 합니다.
 
-`TLS 검증` 스위치는 운영에서 켜 두세요. 끄면 중간자 공격을 막지 못합니다.
+`TLS 검증` 스위치는 운영에서 켜 두세요. 끄면 중간자 공격을 막지 못합니다. MCP SSO(4.5절)는 같은
+Issuer와 TLS 검증 설정으로 액세스 토큰의 서명 키(JWKS)를 가져옵니다.
 
 ### 7.5 취약점 제보
 

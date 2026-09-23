@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addAllowedHost, resolveOidcSettings, splitAllowedHosts } from './settings'
+import { addAllowedHost, mcpMetadataUrlFor, mcpResourceFor, resolveOidcSettings, splitAllowedHosts } from './settings'
 
 describe('settings form aliases', () => {
   it('저장소의 auth.oidc 설정을 OIDC 폼 값으로 사용한다', () => {
@@ -31,5 +31,18 @@ describe('analytics allowed hosts', () => {
 
   it('쉼표·공백·줄바꿈으로 나뉜 목록을 항목으로 나눈다', () => {
     expect(splitAllowedHosts('https://a.example,https://b.example\n https://c.example ')).toEqual(['https://a.example', 'https://b.example', 'https://c.example'])
+  })
+})
+
+describe('mcp oauth connection values', () => {
+  it('prefers the configured resource and falls back to the page origin', () => {
+    expect(mcpResourceFor('https://jupiq.corp/mcp', 'https://127.0.0.1:8080')).toBe('https://jupiq.corp/mcp')
+    expect(mcpResourceFor('  ', 'https://jupiq.corp/')).toBe('https://jupiq.corp/mcp')
+  })
+
+  it('derives the metadata address the way the server does', () => {
+    expect(mcpMetadataUrlFor('https://jupiq.corp/mcp')).toBe('https://jupiq.corp/.well-known/oauth-protected-resource/mcp')
+    expect(mcpMetadataUrlFor('https://jupiq.corp:8443/api/v1/mcp')).toBe('https://jupiq.corp:8443/.well-known/oauth-protected-resource/api/v1/mcp')
+    expect(mcpMetadataUrlFor('not a url')).toBe('')
   })
 })
