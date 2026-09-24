@@ -10,6 +10,7 @@ import {
   GlobalOutlined,
   LinkOutlined,
   LockOutlined,
+  MailOutlined,
   PlusOutlined,
   RobotOutlined,
   SafetyCertificateOutlined,
@@ -56,7 +57,7 @@ import {
 import { NativeSelect } from '../components/NativeSelect'
 import { stableRowKey } from '../utils/rowKey'
 import { sorterFor } from '../utils/sorting'
-import { addAllowedHost, resolveOidcSettings } from '../utils/settings'
+import { addAllowedHost, mailEventLabel, mailSummaryBadges, resolveOidcSettings } from '../utils/settings'
 import { AsyncState } from '../components/AsyncState'
 import { PageHeader } from '../components/PageHeader'
 
@@ -86,7 +87,7 @@ interface TestResult extends ApiRecord {
 
 const secretPaths = [
   ['oidc', 'client_secret'], ['auth.oidc', 'client_secret'], ['prometheus', 'bearer_token'],
-  ['kubernetes', 'bearer_token'], ['ai', 'api_key'], ['notifications', 'secret'],
+  ['kubernetes', 'bearer_token'], ['ai', 'api_key'], ['notifications', 'secret'], ['mail', 'password'],
 ]
 
 function clearSecrets(settings: ApiRecord): ApiRecord {
@@ -471,6 +472,41 @@ function AnalyticsViolationsCard({ canWrite, onAllow }: { canWrite: boolean; onA
   )
 }
 
+interface MailDelivery extends ApiRecord {
+  id: number
+  event: string
+  recipient: string
+  subject: string
+  status: string
+  attempts: number
+  error_message?: string
+  created_at: string
+}
+
+// 사내 릴레이로 나간 알림 메일의 기록. "안 왔다"는 문의에 답하기 위해 성공과
+// 실패를 모두 보여 주며 본문은 서버가 애초에 저장하지 않는다.
+function MailDeliveriesCard() {
+  const { data, loading, refreshing, error, reload } = useApi<{ items: MailDelivery[]; total: number; summary: Record<string, number> }>('/mail/deliveries')
+  const items = data?.items || []
+  const summary = data?.summary || {}
+  return (
+    <Card title={<Space><MailOutlined />발송 기록</Space>} extra={<Space>{mailSummaryBadges(summary).map((badge) => <Tag key={badge.key} color={statusTone(badge.key === 'queued' ? 'pending' : badge.key)}>{badge.label} {badge.count}</Tag>)}<Button size="small" onClick={() => void reload()} loading={refreshing}>새로고침</Button></Space>}>
+      <Typography.Paragraph type="secondary">최근 50건입니다. 언제·어떤 이벤트로·누구에게·어떤 제목으로 나갔고 되었는지만 남기며 본문은 저장하지 않습니다. 기록은 180일 뒤 정리됩니다.</Typography.Paragraph>
+      <AsyncState loading={loading && !data} refreshing={refreshing} error={error && !data ? error : null} onRetry={reload} empty={!loading && !items.length} emptyDescription="아직 보낸 메일이 없습니다. 시험 발송을 하면 여기에 첫 기록이 남습니다.">
+        <Table<MailDelivery> size="small" rowKey="id" dataSource={items} pagination={false} scroll={{ x: 720 }} columns={[
+          { title: '시각', dataIndex: 'created_at', width: 170, render: (value: string) => formatDate(value) },
+          { title: '이벤트', dataIndex: 'event', width: 140, render: (value: string) => <Tag>{mailEventLabel(value)}</Tag> },
+          { title: '수신자', dataIndex: 'recipient', width: 220 },
+          { title: '제목', dataIndex: 'subject', ellipsis: true },
+          { title: '결과', key: 'status', width: 200, render: (_value, row) => row.status === 'sent'
+            ? <Tag color="success">발송됨</Tag>
+            : row.status === 'failed' ? <Typography.Text type="danger" title={row.error_message}>실패 ({row.attempts}회): {asText(row.error_message, '원인 없음')}</Typography.Text> : <Tag>대기</Tag> },
+        ]} />
+      </AsyncState>
+    </Card>
+  )
+}
+
 export function SettingsPage() {
   const { message } = App.useApp()
   const { refreshFeatures, hasGlobalPermission } = useAuth()
@@ -483,6 +519,9 @@ export function SettingsPage() {
   const [testing, setTesting] = useState('')
   const [testResult, setTestResult] = useState<TestResult | null>(null)
   const [testOpen, setTestOpen] = useState(false)
+  const [mailRecipient, setMailRecipient] = useState('')
+  const [mailSending, setMailSending] = useState(false)
+  const [mailResult, setMailResult] = useState<{ success: boolean; text: string } | null>(null)
 
   useEffect(() => {
     if (!data) return
@@ -494,6 +533,7 @@ export function SettingsPage() {
       features: { gpu_monitoring: false, llm_usage_monitoring: false, ...(safe.features as ApiRecord || {}) },
       analytics: { enabled: false, provider: 'momento', momento_proxy: true, momento_verify_tls: true, include_admin: false, placement: 'head', allowed_hosts: '', ...(safe.analytics as ApiRecord || {}) },
       workflow: { approval_enabled: false, ...(safe.workflow as ApiRecord || {}) },
+      mail: { enabled: false, smtp_port: 25, security: 'auto', skip_tls_verify: false, from_name: 'jupiq', timeout_seconds: 10, notify_approval_request: true, notify_approval_decision: true, notify_hub_health: true, notify_key_expiry: true, ...(safe.mail as ApiRecord || {}) },
       ai: { streaming: true, ...(safe.ai as ApiRecord || {}) },
       prometheus: {
         ...(safe.prometheus as ApiRecord || {}),
@@ -560,6 +600,22 @@ export function SettingsPage() {
       })
     } finally {
       setTesting('')
+    }
+  }
+
+  // 시험 발송은 저장된 설정으로 실제 한 통을 보낸다. 폼의 미저장 값이 아니라
+  // 서버가 실제로 쓸 값을 증명해야 하므로, 저장하지 않은 변경이 있으면 막는다.
+  const sendMailTest = async () => {
+    if (mailSending || !canWriteSettings) return
+    setMailSending(true)
+    setMailResult(null)
+    try {
+      const result = await request<{ recipient?: string }>('/mail/test', { method: 'POST', body: jsonBody({ recipient: mailRecipient.trim() }) })
+      setMailResult({ success: true, text: `${asText(result.recipient)} 으로 시험 메일을 보냈습니다. 받은 편지함(스팸함 포함)을 확인하세요.` })
+    } catch (caught) {
+      setMailResult({ success: false, text: caught instanceof Error ? caught.message : '시험 발송에 실패했습니다.' })
+    } finally {
+      setMailSending(false)
     }
   }
 
@@ -669,6 +725,57 @@ export function SettingsPage() {
     <Row gutter={[16, 16]}><Col xs={24} xl={12}><Card title={<Space><LockOutlined />개인 API 키 정책</Space>}><Form.Item name={['security', 'key_rotation_days']} label="기본 회전 주기(일)"><InputNumber min={1} max={3650} style={{ width: '100%' }} /></Form.Item><Form.Item name={['security', 'key_max_lifetime_days']} label="최대 유효기간(일)"><InputNumber min={1} max={3650} style={{ width: '100%' }} /></Form.Item><Form.Item name={['security', 'key_permissions']} label="허용 권한"><Select virtual={false} mode="tags" placeholder="예: hubs:read" /></Form.Item></Card></Col><Col xs={24} xl={12}><Card title="비밀값 암호화"><Alert type="success" showIcon message="비밀값은 애플리케이션 암호화 후 저장됩니다" description="ENCRYPTION_KEY는 환경변수로만 주입되며 관리자 화면에서 조회하거나 변경할 수 없습니다." /></Card></Col>{hasGlobalPermission('roles:read') && <Col xs={24}><RoleManager canWrite={hasGlobalPermission('roles:write')} canAssign={hasGlobalPermission('roles:write') && hasGlobalPermission('users:read')} /></Col>}</Row>
   )
 
+  const mail = (
+    <Row gutter={[16, 16]}>
+      <Col xs={24} xl={12}>
+        <Card title={<Space><MailOutlined />사내 SMTP 릴레이</Space>}>
+          <Typography.Paragraph type="secondary">사람이 기다리는 일(승인 차례, 승인 결과, Hub 수집 실패, API 키 만료 임박)을 사내 SMTP 릴레이로 알립니다. 사내 릴레이는 25번 포트·인증 없음·TLS 없음이 흔하므로 그것이 기본값이고, 인증과 암호화는 있으면 씁니다. 기본값은 꺼짐입니다.</Typography.Paragraph>
+          <Form.Item name={['mail', 'enabled']} label="메일 알림 사용" valuePropName="checked"><Switch checkedChildren="사용" unCheckedChildren="사용 안 함" /></Form.Item>
+          <Row gutter={12}>
+            <Col xs={24} md={16}><Form.Item name={['mail', 'smtp_host']} label="릴레이 주소(smtp_host)"><Input placeholder="mail.internal" /></Form.Item></Col>
+            <Col xs={24} md={8}><Form.Item name={['mail', 'smtp_port']} label="포트(smtp_port)"><InputNumber min={1} max={65535} style={{ width: '100%' }} /></Form.Item></Col>
+          </Row>
+          <Row gutter={12}>
+            <Col xs={24} md={12}><Form.Item name={['mail', 'security']} label="보안(security)" extra="auto는 서버가 STARTTLS를 알리면 쓰고 아니면 평문입니다. 465번 포트는 tls로 봅니다."><NativeSelect options={[{ value: 'auto', label: 'auto — 서버가 알리는 대로' }, { value: 'none', label: 'none — 평문' }, { value: 'starttls', label: 'starttls — 필수' }, { value: 'tls', label: 'tls — 암시적 TLS' }]} /></Form.Item></Col>
+            <Col xs={24} md={12}><Form.Item name={['mail', 'skip_tls_verify']} label="인증서 검증 생략(skip_tls_verify)" valuePropName="checked" extra="사내 인증서가 사설일 때만 켭니다."><Switch checkedChildren="생략" unCheckedChildren="검증" /></Form.Item></Col>
+          </Row>
+          <Row gutter={12}>
+            <Col xs={24} md={12}><Form.Item name={['mail', 'username']} label="사용자 이름(username)" extra="인증 없는 릴레이면 비워 둡니다."><Input autoComplete="off" /></Form.Item></Col>
+            <Col xs={24} md={12}><Form.Item name={['mail', 'password']} label="비밀번호(password)" extra={secretHelp}><Input.Password autoComplete="new-password" placeholder="변경할 때만 입력" /></Form.Item></Col>
+          </Row>
+          <Row gutter={12}>
+            <Col xs={24} md={12}><Form.Item name={['mail', 'from_address']} label="보내는 주소(from_address)"><Input placeholder="jupiq@corp.internal" /></Form.Item></Col>
+            <Col xs={24} md={12}><Form.Item name={['mail', 'from_name']} label="보내는 이름(from_name)"><Input placeholder="jupiq" /></Form.Item></Col>
+          </Row>
+          <Row gutter={12}>
+            <Col xs={24} md={16}><Form.Item name={['mail', 'base_url']} label="이 앱의 주소(base_url)" extra="메일 속 '바로 열기' 링크가 가리킬 주소입니다. 비우면 링크가 빠집니다." rules={[{ type: 'url', warningOnly: true }]}><Input placeholder="https://jupiq.corp.internal" /></Form.Item></Col>
+            <Col xs={24} md={8}><Form.Item name={['mail', 'timeout_seconds']} label="시간 제한(초)"><InputNumber min={1} max={120} style={{ width: '100%' }} /></Form.Item></Col>
+          </Row>
+        </Card>
+      </Col>
+      <Col xs={24} xl={12}>
+        <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          <Card title="이벤트별 스위치" extra={<Typography.Text type="secondary">자기가 한 일은 자기에게 보내지 않습니다</Typography.Text>}>
+            <Form.Item name={['mail', 'notify_approval_request']} label="검토·승인 차례가 됨" valuePropName="checked" extra="approval:review / approval:approve 권한을 전역으로 가진 사람에게. 승인이 늦으면 요청자의 서버 작업이 멈춰 있습니다."><Switch checkedChildren="보냄" unCheckedChildren="안 보냄" /></Form.Item>
+            <Form.Item name={['mail', 'notify_approval_decision']} label="승인·반려·실행 실패 결과" valuePropName="checked" extra="요청자에게. 결과를 모르면 승인 목록을 계속 새로고침하게 됩니다."><Switch checkedChildren="보냄" unCheckedChildren="안 보냄" /></Form.Item>
+            <Form.Item name={['mail', 'notify_hub_health']} label="Hub 수집 실패·복구" valuePropName="checked" extra="hubs:write 권한을 전역으로 가진 사람에게. 상태가 바뀔 때만 한 통이며 멈춰 있는 동안 되풀이하지 않습니다."><Switch checkedChildren="보냄" unCheckedChildren="안 보냄" /></Form.Item>
+            <Form.Item name={['mail', 'notify_key_expiry']} label="API 키 만료 7일 전" valuePropName="checked" extra="키 소유자에게, 키마다 한 번. 같은 사람의 여러 키는 한 통으로 묶습니다."><Switch checkedChildren="보냄" unCheckedChildren="안 보냄" /></Form.Item>
+          </Card>
+          <Card title="시험 발송">
+            <Typography.Paragraph type="secondary"><strong>저장된</strong> 설정으로 실제 한 통을 보냅니다. 릴레이 설정은 한 번에 맞는 일이 드무니 저장한 뒤 여기서 확인하세요.</Typography.Paragraph>
+            {dirty && <Alert className="data-note" type="warning" showIcon message="저장하지 않은 변경이 있습니다" description="시험 발송은 저장된 값을 씁니다. 먼저 설정 저장을 누르세요." />}
+            <Space.Compact style={{ width: '100%' }}>
+              <Input value={mailRecipient} onChange={(event) => setMailRecipient(event.target.value)} placeholder="받을 주소(비우면 내 계정의 메일 주소)" disabled={!canWriteSettings} />
+              <Button type="primary" icon={<MailOutlined />} loading={mailSending} disabled={!canWriteSettings || dirty} onClick={() => void sendMailTest()}>시험 발송</Button>
+            </Space.Compact>
+            {mailResult && <Alert style={{ marginTop: 12 }} type={mailResult.success ? 'success' : 'error'} showIcon message={mailResult.success ? '시험 메일을 보냈습니다' : '시험 발송에 실패했습니다'} description={mailResult.text} />}
+          </Card>
+        </Space>
+      </Col>
+      <Col xs={24}><MailDeliveriesCard /></Col>
+    </Row>
+  )
+
   const tabItems = [
     { key: 'general', label: '기본', icon: <SettingOutlined />, children: general },
     { key: 'features', label: '선택 기능', icon: <ExperimentOutlined />, children: features },
@@ -677,6 +784,7 @@ export function SettingsPage() {
     { key: 'workflow', label: '승인 프로세스', icon: <CheckCircleOutlined />, children: workflow },
     { key: 'security', label: '보안·키 권한', icon: <LockOutlined />, children: security },
     { key: 'analytics', label: '방문 추적', icon: <EyeOutlined />, children: analytics },
+    { key: 'mail', label: '메일 알림', icon: <MailOutlined />, children: mail },
   ]
 
   return (

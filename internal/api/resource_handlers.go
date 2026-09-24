@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/hkjang/jupiq/internal/integration"
+	"github.com/hkjang/jupiq/internal/mail"
 	"github.com/hkjang/jupiq/internal/store"
 )
 
@@ -278,6 +279,8 @@ func (s *Server) approvalReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = s.Store.RecordAudit(r.Context(), requestAudit(r, "approval.review", "approval", strconv.FormatInt(id, 10), "success", input.Reason, flattenResource(approval), flattenResource(saved)))
+	// 검토가 끝났으니 이제 승인자의 차례다.
+	s.notifyPermissionHolders(r.Context(), mail.ApprovalRequested(id, approval.Name, approvalRequesterName(details), "approve", input.Reason), p.User.ID, "approval:approve")
 	response := flattenResource(saved)
 	response["next_action"] = "approve_or_reject"
 	data(w, http.StatusOK, response)
@@ -351,6 +354,7 @@ func (s *Server) approvalApprove(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			_ = s.Store.RecordAudit(r.Context(), requestAudit(r, "approval.approve", "approval", strconv.FormatInt(id, 10), "failure", err.Error(), flattenResource(executing), flattenResource(failed)))
+			s.notifyMail(r.Context(), mail.ApprovalDecided(id, approval.Name, approver, "failed", input.Reason), approverPrincipal.User.ID, approvalOwner(approval))
 			apiError(w, r, 502, "remote_action_failed", err.Error())
 			return
 		}
@@ -367,6 +371,7 @@ func (s *Server) approvalApprove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = s.Store.RecordAudit(r.Context(), requestAudit(r, "approval.approve", "approval", strconv.FormatInt(id, 10), "success", input.Reason, flattenResource(approval), flattenResource(saved)))
+	s.notifyMail(r.Context(), mail.ApprovalDecided(id, approval.Name, approver, "approved", input.Reason), approverPrincipal.User.ID, approvalOwner(approval))
 	data(w, http.StatusOK, flattenResource(saved))
 }
 
@@ -453,6 +458,7 @@ func (s *Server) approvalReject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = s.Store.RecordAudit(r.Context(), requestAudit(r, "approval.reject", "approval", strconv.FormatInt(id, 10), "success", inputBody.Reason, flattenResource(approval), flattenResource(saved)))
+	s.notifyMail(r.Context(), mail.ApprovalDecided(id, approval.Name, rejector.User.Username, "rejected", inputBody.Reason), rejector.User.ID, approvalOwner(approval))
 	data(w, http.StatusOK, flattenResource(saved))
 }
 
@@ -627,6 +633,7 @@ func (s *Server) hubTest(w http.ResponseWriter, r *http.Request) {
 		apiError(w, r, http.StatusConflict, "hub_configuration_changed", "연결 테스트 중 Hub 설정이 변경되어 이전 응답을 폐기했습니다. 다시 시도해 주세요")
 		return
 	}
+	s.notifyHubHealth(r.Context(), hub, healthStored, result.Success, result.Error, principal(r).User.ID)
 	status := "success"
 	if !result.Success {
 		status = "failure"
@@ -676,13 +683,15 @@ func (s *Server) hubSync(w http.ResponseWriter, r *http.Request) {
 					apiError(w, r, http.StatusConflict, "hub_configuration_changed", "동기화 완료 처리 중 Hub 설정이 변경되어 이전 응답을 폐기했습니다. 다시 시도해 주세요")
 					return
 				}
+				s.notifyHubHealth(r.Context(), hub, healthStored, true, "", principal(r).User.ID)
 				_ = s.Store.RecordAudit(r.Context(), requestAudit(r, "hub.sync", "hub", strconv.FormatInt(id, 10), "success", "", nil, map[string]any{"users": len(users)}))
 				data(w, http.StatusOK, map[string]any{"synced": true, "users": len(users), "version": info.Version})
 				return
 			}
 		}
 	}
-	_, _ = s.Store.UpdateHubHealthIfCurrent(r.Context(), hub, false, info.Version, err.Error(), nil)
+	healthStored, _ := s.Store.UpdateHubHealthIfCurrent(r.Context(), hub, false, info.Version, err.Error(), nil)
+	s.notifyHubHealth(r.Context(), hub, healthStored, false, err.Error(), principal(r).User.ID)
 	_ = s.Store.RecordAudit(r.Context(), requestAudit(r, "hub.sync", "hub", strconv.FormatInt(id, 10), "failure", err.Error(), nil, nil))
 	apiError(w, r, 502, "hub_sync_failed", "JupyterHub 동기화에 실패했습니다: "+err.Error())
 }
@@ -724,6 +733,13 @@ func (s *Server) serverAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_ = s.Store.RecordAudit(r.Context(), requestAudit(r, "server."+action+".request", "server", strconv.FormatInt(id, 10), "success", "", nil, map[string]any{"approval_id": approval.ID}))
+		// 검토·승인 차례가 된 사람에게 알린다. 팀장 선검토가 켜져 있으면 검토자가
+		// 먼저이고, 검토가 끝나면 approvalReview가 승인자에게 다시 알린다.
+		stage, permission := "approve", "approval:approve"
+		if workflow.ManagerReviewEnabled {
+			stage, permission = "review", "approval:review"
+		}
+		s.notifyPermissionHolders(r.Context(), mail.ApprovalRequested(approval.ID, approval.Name, p.User.Username, stage, ""), p.User.ID, permission)
 		data(w, http.StatusAccepted, map[string]any{"approval_required": true, "manager_review_required": workflow.ManagerReviewEnabled, "status": initialStatus, "next_action": map[bool]string{true: "review", false: "approve_or_reject"}[workflow.ManagerReviewEnabled], "approval": flattenResource(approval)})
 		return
 	}

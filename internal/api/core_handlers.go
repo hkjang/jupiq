@@ -15,6 +15,7 @@ import (
 
 	"github.com/hkjang/jupiq/internal/analytics"
 	"github.com/hkjang/jupiq/internal/integration"
+	"github.com/hkjang/jupiq/internal/mail"
 	"github.com/hkjang/jupiq/internal/store"
 )
 
@@ -672,7 +673,7 @@ func applySecureIntegrationDefaults(values map[string]any) {
 var allowedSettingKeys = map[string]bool{
 	"system": true, "workflow": true, "auth.oidc": true, "ai": true, "prometheus": true,
 	"kubernetes": true, "notifications": true, "features": true, "llm_usage": true,
-	"security": true, analytics.SettingKey: true,
+	"security": true, analytics.SettingKey: true, mail.SettingKey: true,
 }
 
 var allowedSettingFields = map[string]map[string]bool{
@@ -687,6 +688,7 @@ var allowedSettingFields = map[string]map[string]bool{
 	"llm_usage":     {"source": true, "pod_username_regex": true, "sample_pod": true, "path_matcher": true, "label_mappings": true, "promql": true, "input_cost_per_million": true, "output_cost_per_million": true, "stale_seconds": true, "retention_days": true},
 	"security":      {"key_rotation_days": true, "key_max_lifetime_days": true, "key_permissions": true},
 	"analytics":     {"enabled": true, "provider": true, "momento_url": true, "momento_site_id": true, "momento_proxy": true, "momento_verify_tls": true, "measurement_id": true, "matomo_url": true, "matomo_site_id": true, "custom_snippet": true, "allowed_hosts": true, "include_admin": true, "placement": true},
+	"mail":          {"enabled": true, "smtp_host": true, "smtp_port": true, "security": true, "skip_tls_verify": true, "username": true, "from_address": true, "from_name": true, "base_url": true, "timeout_seconds": true, "notify_approval_request": true, "notify_approval_decision": true, "notify_hub_health": true, "notify_key_expiry": true},
 }
 
 func validateSettingsUpdate(values map[string]any, secrets map[string]string) error {
@@ -725,6 +727,7 @@ func validateSettingSection(key string, object map[string]any) error {
 		"notifications": {"base_url"},
 		"llm_usage":     {"source", "pod_username_regex", "sample_pod", "path_matcher"},
 		"analytics":     {"provider", "momento_url", "momento_site_id", "measurement_id", "matomo_url", "matomo_site_id", "custom_snippet", "allowed_hosts", "placement"},
+		"mail":          {"smtp_host", "security", "username", "from_address", "from_name", "base_url"},
 	}
 	for _, field := range stringFields[key] {
 		if raw, exists := object[field]; exists {
@@ -746,6 +749,7 @@ func validateSettingSection(key string, object map[string]any) error {
 		"kubernetes":    {"enabled", "verify_tls"},
 		"notifications": {"webhook_enabled"},
 		"analytics":     {"enabled", "momento_proxy", "momento_verify_tls", "include_admin"},
+		"mail":          {"enabled", "skip_tls_verify", "notify_approval_request", "notify_approval_decision", "notify_hub_health", "notify_key_expiry"},
 	}
 	for _, field := range boolFields[key] {
 		if value, exists := object[field]; exists {
@@ -766,6 +770,7 @@ func validateSettingSection(key string, object map[string]any) error {
 		{"llm_usage", "stale_seconds", 30, 86400}, {"llm_usage", "retention_days", 1, 365},
 		{"llm_usage", "input_cost_per_million", 0, 1e12}, {"llm_usage", "output_cost_per_million", 0, 1e12},
 		{"security", "key_rotation_days", 1, 3650}, {"security", "key_max_lifetime_days", 1, 3650},
+		{"mail", "smtp_port", 1, 65535}, {"mail", "timeout_seconds", 1, 120},
 	} {
 		if bound.section != key {
 			continue
@@ -815,6 +820,24 @@ func validateSettingSection(key string, object map[string]any) error {
 		// provider별 필수 항목과 스니펫 크기 상한은 analytics 패키지가 한곳에서 정한다.
 		if err := analytics.ReadConfig(object).Validate(); err != nil {
 			return err
+		}
+	}
+	if key == mail.SettingKey {
+		// 릴레이 주소·보내는 주소·보안 방식의 규칙은 mail 패키지가 발송 시점과
+		// 같은 것으로 정한다. 꺼져 있으면 빈 설정을 저장할 수 있어야 하므로
+		// 켜진 경우에만 검사한다.
+		config := mail.ReadConfig(object, "")
+		if raw, exists := object["security"]; exists {
+			switch strings.ToLower(strings.TrimSpace(fmt.Sprint(raw))) {
+			case "", mail.SecurityAuto, mail.SecurityNone, mail.SecurityStartTLS, mail.SecurityTLS:
+			default:
+				return fmt.Errorf("mail.security는 auto, none, starttls, tls 중 하나여야 합니다")
+			}
+		}
+		if enabled {
+			if err := config.Validate(); err != nil {
+				return err
+			}
 		}
 	}
 	if key == "ai" {

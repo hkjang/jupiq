@@ -173,6 +173,7 @@ func (s *Store) Seed(ctx context.Context, username, password string) error {
 		"features":      map[string]any{"gpu_monitoring": false, "llm_usage_monitoring": false},
 		"llm_usage":     map[string]any{"source": "prometheus", "pod_username_regex": "^jupyter-(?P<username>[a-zA-Z0-9._-]+)", "path_matcher": "/v1/chat/completions", "label_mappings": map[string]string{}, "promql": map[string]string{"calls": "sum(increase(http_requests_total{path=\"/v1/chat/completions\"}[1m])) by (pod,path,status,model,hub)"}, "input_cost_per_million": 0, "output_cost_per_million": 0, "stale_seconds": 300, "retention_days": 30},
 		"security":      map[string]any{"key_rotation_days": 90, "key_max_lifetime_days": 365, "key_permissions": []string{}},
+		"mail":          map[string]any{"enabled": false, "smtp_host": "", "smtp_port": 25, "security": "auto", "skip_tls_verify": false, "username": "", "from_address": "", "from_name": "jupiq", "base_url": "", "timeout_seconds": 10, "notify_approval_request": true, "notify_approval_decision": true, "notify_hub_health": true, "notify_key_expiry": true},
 	}
 	for key, value := range defaults {
 		blob, _ := json.Marshal(value)

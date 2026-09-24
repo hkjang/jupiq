@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/hkjang/jupiq/internal/integration"
+	"github.com/hkjang/jupiq/internal/mail"
 	"github.com/hkjang/jupiq/internal/store"
 )
 
@@ -24,18 +25,25 @@ const (
 	// land their writes after the context is cancelled, so one wedged hub
 	// cannot hold shutdown open indefinitely.
 	hubShutdownGrace = 10 * time.Second
+	// keyExpiryInterval은 만료 임박 키를 찾는 주기, keyExpiryWindow는 만료 며칠
+	// 전에 알리는지다. 키마다 한 번만 보내므로 자주 봐도 되풀이되지 않는다.
+	keyExpiryInterval = time.Hour
+	keyExpiryWindow   = 7 * 24 * time.Hour
 )
 
 type Collector struct {
-	Store       *store.Store
-	Logger      *slog.Logger
-	hubSlots    chan struct{}
-	hubs        sync.WaitGroup
-	mu          sync.Mutex
-	last        map[int64]time.Time
-	lastLLMScan time.Time
-	lastPrune   time.Time
-	pruneRetry  bool
+	Store  *store.Store
+	Logger *slog.Logger
+	// Mail이 있으면 Hub 상태 전이와 API 키 만료 임박을 메일로 알린다.
+	Mail          *mail.Service
+	hubSlots      chan struct{}
+	hubs          sync.WaitGroup
+	mu            sync.Mutex
+	last          map[int64]time.Time
+	lastLLMScan   time.Time
+	lastPrune     time.Time
+	pruneRetry    bool
+	lastKeyExpiry time.Time
 }
 
 func New(s *store.Store, logger *slog.Logger) *Collector {
@@ -114,6 +122,7 @@ func (c *Collector) collect(ctx context.Context) {
 	c.collectPrometheus(ctx)
 	c.collectLLMUsage(ctx)
 	c.rollUpUsage(ctx)
+	c.notifyExpiringKeys(ctx)
 	c.prune(ctx)
 }
 
@@ -177,9 +186,64 @@ func (c *Collector) updateHubHealth(parent context.Context, hub store.Hub, succe
 	stored, err := c.Store.UpdateHubHealthIfCurrent(writeCtx, hub, success, version, message, snapshot)
 	if err != nil {
 		c.Logger.Warn("hub health update failed", "hub_id", hub.ID, "error", err)
-	} else if !stored {
-		c.Logger.Debug("discarded stale hub health", "hub_id", hub.ID)
+		return
 	}
+	if !stored {
+		c.Logger.Debug("discarded stale hub health", "hub_id", hub.ID)
+		return
+	}
+	c.notifyHubHealth(writeCtx, hub, success, message)
+}
+
+// notifyHubHealth는 Hub 상태가 healthy↔degraded로 넘어갔을 때만 hubs:write
+// 권한을 가진 사람에게 알린다. hub는 이번 결과를 쓰기 전에 읽은 행이라 그
+// Status가 직전 상태다. 수집기에는 행위자가 없다.
+func (c *Collector) notifyHubHealth(ctx context.Context, hub store.Hub, success bool, cause string) {
+	if c.Mail == nil {
+		return
+	}
+	notification, changed := mail.HubHealthChange(hub.ID, hub.Name, hub.Status, success, cause)
+	if !changed {
+		return
+	}
+	recipients, err := c.Store.UsersWithGlobalPermission(ctx, "hubs:write")
+	if err != nil {
+		c.Logger.Warn("hub health mail recipients lookup failed", "hub_id", hub.ID, "error", err)
+		return
+	}
+	c.Mail.Notify(ctx, notification, 0, recipients)
+}
+
+// notifyExpiringKeys는 한 시간에 한 번 만료가 7일 안으로 다가온 개인 API 키를
+// 찾아 소유자에게 한 통으로 묶어 알린다. 메일이 꺼져 있으면 아무것도 표시하지
+// 않아, 나중에 켰을 때 그때 남은 키가 안내된다.
+func (c *Collector) notifyExpiringKeys(ctx context.Context) {
+	if c.Mail == nil || !c.keyExpiryDue(time.Now()) {
+		return
+	}
+	config, err := c.Mail.Config(ctx)
+	if err != nil || !config.Enabled || !config.Allows(mail.EventKeyExpiring) {
+		return
+	}
+	byUser, err := c.Store.ExpiringAPIKeys(ctx, keyExpiryWindow)
+	if err != nil {
+		c.Logger.Warn("expiring api key scan failed", "error", err)
+		return
+	}
+	now := time.Now().UTC()
+	for userID, keys := range byUser {
+		c.Mail.Notify(ctx, mail.KeysExpiring(keys, now), 0, []int64{userID})
+	}
+}
+
+func (c *Collector) keyExpiryDue(now time.Time) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.lastKeyExpiry.IsZero() && now.Sub(c.lastKeyExpiry) < keyExpiryInterval {
+		return false
+	}
+	c.lastKeyExpiry = now
+	return true
 }
 
 func (c *Collector) due(hub store.Hub) bool {
@@ -488,6 +552,10 @@ func (c *Collector) prune(ctx context.Context) {
 	}
 	if err := c.Store.PruneResourceUsage(ctx, system.UsageRetentionDays); err != nil {
 		c.Logger.Warn("resource usage retention prune failed", "error", err)
+		c.pruneFailed()
+	}
+	if err := c.Store.PruneMailDeliveries(ctx); err != nil {
+		c.Logger.Warn("mail delivery prune failed", "error", err)
 		c.pruneFailed()
 	}
 }

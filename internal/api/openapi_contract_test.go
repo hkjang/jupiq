@@ -50,6 +50,7 @@ func registeredRoutes(t *testing.T) map[string]bool {
 	s.registerAI(rec)
 	s.registerMCP(rec)
 	s.registerAnalytics(rec)
+	s.registerMail(rec)
 	rec.HandleFunc("GET /", s.serveSPA)
 	routes := map[string]bool{}
 	for _, pattern := range rec.patterns {

@@ -626,6 +626,32 @@ paths:
       operationId: clearAnalyticsViolations
       description: 기록을 비운다. settings:write 권한이 필요하다.
       responses: { '204': { description: 삭제 완료 } }
+  /mail/deliveries:
+    get:
+      tags: [Administration]
+      operationId: listMailDeliveries
+      description: 사내 SMTP 릴레이로 나간 알림 메일의 발송 기록(최신순). 시도마다 언제·어떤 이벤트로·누구에게·어떤 제목으로·성공했는지 남기며 본문은 담지 않는다. settings:read 권한이 필요하다.
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [queued, sent, failed] }, description: 비우면 전체 }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses: { '200': { $ref: '#/components/responses/Success' } }
+  /mail/test:
+    post:
+      tags: [Administration]
+      operationId: sendMailTest
+      description: 저장된 mail 설정으로 실제 시험 메일 한 통을 보내고 결과를 바로 돌려준다. 발송 기록에도 남는다. settings:write 권한이 필요하다.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                recipient: { type: string, description: 비우면 요청한 관리자의 메일 주소 }
+      responses:
+        '200': { $ref: '#/components/responses/Success' }
+        '400': { description: 수신자가 없거나 설정이 불완전함(invalid_recipient, mail_invalid) }
+        '409': { description: 메일 알림이 꺼져 있음(mail_disabled) }
+        '502': { description: 릴레이가 거부함(mail_send_failed) }
   /keys:
     get:
       operationId: listPersonalKeys
