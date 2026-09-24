@@ -132,6 +132,10 @@ type Service struct {
 	// providers remembers discovered OIDC providers between the login start,
 	// its callback and later sign-ins; see oidcProviderCache.
 	providers *oidcProviderCache
+	// oidcSettings reads the stored OIDC configuration. Production leaves it
+	// nil and goes to the store; a test sets it to drive a full login start and
+	// callback without a database behind them.
+	oidcSettings func(ctx context.Context) (OIDCConfig, string, bool, error)
 }
 
 func NewService(s *store.Store, cipher *secure.Cipher) *Service {

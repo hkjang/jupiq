@@ -94,6 +94,9 @@ func (s *Service) OIDCConfig(ctx context.Context) (OIDCConfig, bool, error) {
 }
 
 func (s *Service) oidcConfigAndSecret(ctx context.Context) (OIDCConfig, string, bool, error) {
+	if s.oidcSettings != nil {
+		return s.oidcSettings(ctx)
+	}
 	var cfg OIDCConfig
 	secret, configured, err := s.Store.GetSettingAndSecret(ctx, "auth.oidc", "oidc.client_secret", &cfg)
 	return cfg, secret, configured, err
@@ -146,17 +149,22 @@ func (s *Service) OIDCLogin(ctx context.Context, redirectOverride, returnTo stri
 	return oauthConfig.AuthCodeURL(state, options...), encrypted, expires, nil
 }
 
+// randomToken draws one login token. It is a variable so a test can make the
+// entropy source fail and observe that the login is refused; production always
+// reads secure.RandomToken.
+var randomToken = secure.RandomToken
+
 // oidcLoginTokens draws the state, nonce and PKCE verifier for one login
 // start. Entropy failure is not survivable here: a predictable state would
 // defeat the CSRF check, so the login is refused instead of continuing.
 func oidcLoginTokens() (state, nonce, verifier string, err error) {
-	if state, err = secure.RandomToken(24); err != nil {
+	if state, err = randomToken(24); err != nil {
 		return "", "", "", err
 	}
-	if nonce, err = secure.RandomToken(24); err != nil {
+	if nonce, err = randomToken(24); err != nil {
 		return "", "", "", err
 	}
-	if verifier, err = secure.RandomToken(48); err != nil {
+	if verifier, err = randomToken(48); err != nil {
 		return "", "", "", err
 	}
 	return state, nonce, verifier, nil
