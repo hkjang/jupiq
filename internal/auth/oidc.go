@@ -94,6 +94,9 @@ func (s *Service) OIDCConfig(ctx context.Context) (OIDCConfig, bool, error) {
 }
 
 func (s *Service) oidcConfigAndSecret(ctx context.Context) (OIDCConfig, string, bool, error) {
+	if s.oidcSettings != nil {
+		return s.oidcSettings(ctx)
+	}
 	var cfg OIDCConfig
 	secret, configured, err := s.Store.GetSettingAndSecret(ctx, "auth.oidc", "oidc.client_secret", &cfg)
 	return cfg, secret, configured, err
@@ -117,14 +120,14 @@ func (s *Service) OIDCLogin(ctx context.Context, redirectOverride, returnTo stri
 	if _, err := url.ParseRequestURI(cfg.RedirectURL); err != nil {
 		return "", "", time.Time{}, errors.New("OIDC redirect URL이 올바르지 않습니다")
 	}
-	providerCtx := oidc.ClientContext(ctx, integration.SafeHTTPClient(cfg.VerifyTLS, 10*time.Second))
-	provider, err := oidc.NewProvider(providerCtx, cfg.IssuerURL)
+	provider, _, err := s.providers.get(ctx, cfg.IssuerURL, cfg.VerifyTLS)
 	if err != nil {
 		return "", "", time.Time{}, err
 	}
-	state, _ := secure.RandomToken(24)
-	nonce, _ := secure.RandomToken(24)
-	verifier, _ := secure.RandomToken(48)
+	state, nonce, verifier, err := oidcLoginTokens()
+	if err != nil {
+		return "", "", time.Time{}, err
+	}
 	expires := time.Now().UTC().Add(10 * time.Minute)
 	stateValue := oidcState{State: state, Nonce: nonce, CodeVerifier: verifier, ReturnTo: SanitizeReturnTo(returnTo), Silent: silent, ExpiresAt: expires}
 	encrypted, err := s.sealOIDCState(stateValue)
@@ -144,6 +147,27 @@ func (s *Service) OIDCLogin(ctx context.Context, redirectOverride, returnTo stri
 		options = append(options, oauth2.SetAuthURLParam("prompt", "none"))
 	}
 	return oauthConfig.AuthCodeURL(state, options...), encrypted, expires, nil
+}
+
+// randomToken draws one login token. It is a variable so a test can make the
+// entropy source fail and observe that the login is refused; production always
+// reads secure.RandomToken.
+var randomToken = secure.RandomToken
+
+// oidcLoginTokens draws the state, nonce and PKCE verifier for one login
+// start. Entropy failure is not survivable here: a predictable state would
+// defeat the CSRF check, so the login is refused instead of continuing.
+func oidcLoginTokens() (state, nonce, verifier string, err error) {
+	if state, err = randomToken(24); err != nil {
+		return "", "", "", err
+	}
+	if nonce, err = randomToken(24); err != nil {
+		return "", "", "", err
+	}
+	if verifier, err = randomToken(48); err != nil {
+		return "", "", "", err
+	}
+	return state, nonce, verifier, nil
 }
 
 // SilentLoginAllowed decides whether a requested silent attempt may proceed.
@@ -243,14 +267,18 @@ func (s *Service) OIDCCallback(ctx context.Context, code, state, stateCookie, re
 	if _, err := integration.ValidateEndpoint(cfg.IssuerURL); err != nil {
 		return store.User{}, DefaultReturnTo, err
 	}
-	providerCtx := oidc.ClientContext(ctx, integration.SafeHTTPClient(cfg.VerifyTLS, 10*time.Second))
-	provider, err := oidc.NewProvider(providerCtx, cfg.IssuerURL)
+	provider, client, err := s.providers.get(ctx, cfg.IssuerURL, cfg.VerifyTLS)
 	if err != nil {
 		return store.User{}, DefaultReturnTo, err
 	}
+	providerCtx := oidc.ClientContext(ctx, client)
 	oauthConfig := oauth2.Config{ClientID: cfg.ClientID, ClientSecret: secret, Endpoint: provider.Endpoint(), RedirectURL: cfg.RedirectURL, Scopes: cfg.Scopes}
 	token, err := oauthConfig.Exchange(providerCtx, code, oauth2.SetAuthURLParam("code_verifier", saved.CodeVerifier))
 	if err != nil {
+		// A rejected code is the common cause, but a provider that moved its
+		// token endpoint looks the same from here; dropping the cached
+		// discovery makes the next attempt re-read the document either way.
+		s.providers.forget(cfg.IssuerURL, cfg.VerifyTLS)
 		return store.User{}, DefaultReturnTo, errors.New("OIDC authorization code 교환에 실패했습니다")
 	}
 	rawIDToken, ok := token.Extra("id_token").(string)
