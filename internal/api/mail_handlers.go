@@ -17,7 +17,11 @@ func (s *Server) registerMail(mux router) {
 
 // mailDeliveries는 무엇이 건물 밖으로 나갔는지 보여 준다. 본문은 기록에 없다.
 func (s *Server) mailDeliveries(w http.ResponseWriter, r *http.Request) {
-	page, err := s.Store.ListMailDeliveries(r.Context(), r.URL.Query().Get("status"), queryInt(r, "limit", 50))
+	limit, ok := queryIntOrReject(w, r, "limit", 50)
+	if !ok {
+		return
+	}
+	page, err := s.Store.ListMailDeliveries(r.Context(), r.URL.Query().Get("status"), limit)
 	if err != nil {
 		handleStoreError(w, r, err)
 		return
