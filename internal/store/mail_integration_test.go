@@ -46,7 +46,7 @@ func TestMailStoreContractsIntegration(t *testing.T) {
 		_, _ = database.Pool.Exec(ctx, `UPDATE settings SET value=$2 WHERE setting_key=$1`, mail.SettingKey, previousMail)
 		_, _ = database.Pool.Exec(ctx, `DELETE FROM mail_deliveries WHERE actor_user_id=$1 OR recipient LIKE $2`, adminID, marker+"%")
 		_, _ = database.Pool.Exec(ctx, `DELETE FROM secrets WHERE secret_key=$1`, mail.SecretKey)
-		_, _ = database.Pool.Exec(ctx, `DELETE FROM users WHERE username=$1`, marker)
+		_, _ = database.Pool.Exec(ctx, `DELETE FROM users WHERE username LIKE $1`, marker+"%")
 	}()
 
 	// 새로 설치한 곳: 꺼져 있고 비밀번호가 없다.
@@ -168,4 +168,71 @@ func TestMailStoreContractsIntegration(t *testing.T) {
 	if len(again[adminID]) != 0 {
 		t.Fatalf("a key must be reported once: %+v", again)
 	}
+
+	// 보낼 주소가 없는 소유자의 키는 표시하지 않는다. Notify는 주소가 0개면
+	// mail_deliveries도 로그도 남기지 않고 돌아가므로, 여기서 안내한 것으로
+	// 표시하면 그 키는 어디에도 흔적 없이 조용히 만료된다.
+	silentID := createTestUser(ctx, t, database, marker+"-silent", "")
+	inactiveID := createTestUser(ctx, t, database, marker+"-inactive", marker+"-inactive@corp.internal")
+	if _, err := database.Pool.Exec(ctx, `UPDATE users SET active=false WHERE id=$1`, inactiveID); err != nil {
+		t.Fatal(err)
+	}
+	// UpdateProfile은 입력을 다듬지 않으므로 공백뿐인 주소가 실제로 저장된다.
+	// UserEmails는 그것을 다듬어 빈 문자열로 돌려주니 결국 보낼 곳이 없다.
+	blankID := createTestUser(ctx, t, database, marker+"-blank", "   ")
+	unreachableOwners := []int64{silentID, inactiveID, blankID}
+	for _, owner := range unreachableOwners {
+		if _, _, err := database.CreateAPIKey(ctx, owner, fmt.Sprintf("%s-unreachable-%d", marker, owner), []string{"hubs:read"}, &soon, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	unreachable, err := database.ExpiringAPIKeys(ctx, 7*24*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, owner := range unreachableOwners {
+		if len(unreachable[owner]) != 0 {
+			t.Fatalf("keys of owner %d with no deliverable address must not be reported: %+v", owner, unreachable)
+		}
+	}
+	for _, owner := range unreachableOwners {
+		var notified *time.Time
+		if err := database.Pool.QueryRow(ctx, `SELECT expiry_notified_at FROM api_keys WHERE user_id=$1`, owner).Scan(&notified); err != nil {
+			t.Fatal(err)
+		}
+		if notified != nil {
+			t.Fatalf("expiry_notified_at must stay NULL for owner %d: %v", owner, *notified)
+		}
+	}
+
+	// 관리자가 주소를 채우면 그때 안내 기회가 살아 있어 한 번 나온다.
+	if _, err := database.Pool.Exec(ctx, `UPDATE users SET email=$2 WHERE id=$1`, silentID, marker+"-silent@corp.internal"); err != nil {
+		t.Fatal(err)
+	}
+	reachable, err := database.ExpiringAPIKeys(ctx, 7*24*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if keys := reachable[silentID]; len(keys) != 1 || keys[0].Name != fmt.Sprintf("%s-unreachable-%d", marker, silentID) {
+		t.Fatalf("filling in the address must hand the key over once: %+v", reachable)
+	}
+	if len(reachable[inactiveID]) != 0 || len(reachable[blankID]) != 0 {
+		t.Fatalf("an inactive or blank-address owner must stay out of the notification: %+v", reachable)
+	}
+	if last, err := database.ExpiringAPIKeys(ctx, 7*24*time.Hour); err != nil || len(last[silentID]) != 0 {
+		t.Fatalf("the key must still be reported only once: %v %+v", err, last)
+	}
+}
+
+// createTestUser는 통합 테스트용 지역 계정을 만든다. Seed와 달리 email을 직접
+// 정해 수신자 해석 경로를 구분해 볼 수 있게 한다.
+func createTestUser(ctx context.Context, t *testing.T, database *Store, username, email string) int64 {
+	t.Helper()
+	var id int64
+	if err := database.Pool.QueryRow(ctx, `
+		INSERT INTO users(username, display_name, email, auth_source)
+		VALUES($1,$1,$2,'local') RETURNING id`, username, email).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	return id
 }

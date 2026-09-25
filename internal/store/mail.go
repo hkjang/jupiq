@@ -156,11 +156,17 @@ func (s *Store) PruneMailDeliveries(ctx context.Context) error {
 // ExpiringAPIKeys는 아직 안내하지 않은, 만료가 within 안으로 다가온 활성
 // 키를 소유자별로 묶어 돌려준다. 돌려준 키는 안내한 것으로 표시하므로 릴레이가
 // 죽어 있어도 같은 키에 되풀이 보내지 않는다 — 발송 실패는 기록에 남는다.
+// 표시하는 것은 보낼 주소가 있는 소유자의 키뿐이다 — 조건은 UserEmails가
+// 수신자를 해석할 때와 같게 두어(활성이고, 다듬은 email이 비어 있지 않음) 두
+// 경로가 같은 계정을 같게 읽는다. 주소가 없으면 Notify가 기록도 로그도 없이
+// 돌아가므로, 표시부터 하면 그 키는 흔적 없이 조용히 만료된다 — 나중에 주소를
+// 채우면 그때 한 번 안내한다.
 func (s *Store) ExpiringAPIKeys(ctx context.Context, within time.Duration) (map[int64][]mail.ExpiringKey, error) {
 	rows, err := s.Pool.Query(ctx, `
 		UPDATE api_keys SET expiry_notified_at=now()
 		WHERE status='active' AND expiry_notified_at IS NULL
 		  AND expires_at IS NOT NULL AND expires_at > now() AND expires_at <= now() + $1::interval
+		  AND user_id IN (SELECT id FROM users WHERE active AND btrim(email)<>'')
 		RETURNING id,user_id,name,prefix,expires_at`, within)
 	if err != nil {
 		return nil, err
