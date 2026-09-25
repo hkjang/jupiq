@@ -14,6 +14,15 @@ import (
 // 부담은 작지만 무한히 쌓이지는 않게 한다.
 const mailDeliveryRetention = 180 * 24 * time.Hour
 
+// nonBlankEmailPattern은 "Go의 strings.TrimSpace로 다듬어도 뭔가 남는다"를
+// PostgreSQL 정규식으로 옮긴 것이다. 수신자 해석(UserEmails → mail의 resolve)이
+// TrimSpace로 판정하므로 SQL도 같은 문자 집합을 봐야 한다. POSIX [[:space:]]는
+// 쓰지 않는다 — 로케일에 따라 NBSP(U+00A0)·Ogham 공백을 공백으로 세지 않아
+// 판정이 갈린다(PostgreSQL 16 UTF8에서 확인). 열거한 문자는 unicode.IsSpace의
+// 집합 그대로다: 공백·탭·LF·VT·FF·CR·NEL·NBSP와 Zs/Zl/Zp. Go가 이스케이프를
+// 풀어 보내므로 PostgreSQL은 문자 그대로를 담은 대괄호식을 받는다.
+const nonBlankEmailPattern = "[^ \t\n\v\f\r\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]"
+
 // MailSettings는 mail 문서와 SMTP 비밀번호를 한 MVCC 스냅샷으로 돌려준다.
 // 문서가 없으면 빈 값이고(꺼짐), 비밀번호가 없으면 빈 문자열이다.
 func (s *Store) MailSettings(ctx context.Context) (json.RawMessage, string, error) {
@@ -156,18 +165,21 @@ func (s *Store) PruneMailDeliveries(ctx context.Context) error {
 // ExpiringAPIKeys는 아직 안내하지 않은, 만료가 within 안으로 다가온 활성
 // 키를 소유자별로 묶어 돌려준다. 돌려준 키는 안내한 것으로 표시하므로 릴레이가
 // 죽어 있어도 같은 키에 되풀이 보내지 않는다 — 발송 실패는 기록에 남는다.
-// 표시하는 것은 보낼 주소가 있는 소유자의 키뿐이다 — 조건은 UserEmails가
-// 수신자를 해석할 때와 같게 두어(활성이고, 다듬은 email이 비어 있지 않음) 두
-// 경로가 같은 계정을 같게 읽는다. 주소가 없으면 Notify가 기록도 로그도 없이
-// 돌아가므로, 표시부터 하면 그 키는 흔적 없이 조용히 만료된다 — 나중에 주소를
-// 채우면 그때 한 번 안내한다.
+// 표시하는 것은 활성이고 다듬은 email이 비어 있지 않은 소유자의 키뿐이다
+// (nonBlankEmailPattern이 수신자 해석의 TrimSpace와 같은 문자 집합을 본다).
+// 주소가 없으면 Notify가 기록도 로그도 없이 돌아가므로, 표시부터 하면 그 키는
+// 흔적 없이 조용히 만료된다 — 나중에 주소를 채우면 그때 한 번 안내한다.
+// 다만 수신자 해석은 여기보다 좁다: resolve의 validAddress는 '@'가 없는
+// email='nonsense' 같은 주소도 버리므로, 그런 소유자의 키는 아직 표시만 되고
+// 안내되지 않는다. SQL로 주소 모양까지 흉내 내면 두 파서가 갈리므로, 그 계열은
+// UpdateProfile·UpsertOIDCUser의 입력 검증으로 막아야 한다.
 func (s *Store) ExpiringAPIKeys(ctx context.Context, within time.Duration) (map[int64][]mail.ExpiringKey, error) {
 	rows, err := s.Pool.Query(ctx, `
 		UPDATE api_keys SET expiry_notified_at=now()
 		WHERE status='active' AND expiry_notified_at IS NULL
 		  AND expires_at IS NOT NULL AND expires_at > now() AND expires_at <= now() + $1::interval
-		  AND user_id IN (SELECT id FROM users WHERE active AND btrim(email)<>'')
-		RETURNING id,user_id,name,prefix,expires_at`, within)
+		  AND user_id IN (SELECT id FROM users WHERE active AND email ~ $2)
+		RETURNING id,user_id,name,prefix,expires_at`, within, nonBlankEmailPattern)
 	if err != nil {
 		return nil, err
 	}

@@ -177,11 +177,28 @@ func TestMailStoreContractsIntegration(t *testing.T) {
 	if _, err := database.Pool.Exec(ctx, `UPDATE users SET active=false WHERE id=$1`, inactiveID); err != nil {
 		t.Fatal(err)
 	}
-	// UpdateProfile은 입력을 다듬지 않으므로 공백뿐인 주소가 실제로 저장된다.
-	// UserEmails는 그것을 다듬어 빈 문자열로 돌려주니 결국 보낼 곳이 없다.
-	blankID := createTestUser(ctx, t, database, marker+"-blank", "   ")
-	unreachableOwners := []int64{silentID, inactiveID, blankID}
-	for _, owner := range unreachableOwners {
+	// UpdateProfile은 입력을 다듬지 않으므로 공백류만 든 주소가 실제로 저장된다.
+	// 공백 하나만이 아니라 탭·줄바꿈·NBSP까지 세운다 — Go의 TrimSpace가 지우는
+	// 문자는 전부 "보낼 곳이 없다"로 읽혀야 한다(btrim은 공백만 지워 여기서 갈렸다).
+	blankForms := map[string]string{
+		"spaces": "   ",
+		"tab":    "\t",
+		"crlf":   "\r\n",
+		"nbsp":   "\u00a0",
+		"mixed":  " \t\r\n\v\f\u0085\u00a0\u2028\u3000",
+	}
+	unreachableOwners := []int64{silentID, inactiveID}
+	for name, address := range blankForms {
+		if strings.TrimSpace(address) != "" {
+			t.Fatalf("test data %s must be blank after TrimSpace: %q", name, address)
+		}
+		unreachableOwners = append(unreachableOwners, createTestUser(ctx, t, database, marker+"-blank-"+name, address))
+	}
+	blankOwners := unreachableOwners[2:]
+	// 반대쪽 경계: 공백에 둘러싸인 멀쩡한 주소는 resolve가 다듬어 실제로 보내니
+	// 조건이 이것까지 걸러서는 안 된다.
+	paddedID := createTestUser(ctx, t, database, marker+"-padded", "\t "+marker+"-padded@corp.internal \r\n")
+	for _, owner := range append([]int64{paddedID}, unreachableOwners...) {
 		if _, _, err := database.CreateAPIKey(ctx, owner, fmt.Sprintf("%s-unreachable-%d", marker, owner), []string{"hubs:read"}, &soon, nil); err != nil {
 			t.Fatal(err)
 		}
@@ -194,6 +211,9 @@ func TestMailStoreContractsIntegration(t *testing.T) {
 		if len(unreachable[owner]) != 0 {
 			t.Fatalf("keys of owner %d with no deliverable address must not be reported: %+v", owner, unreachable)
 		}
+	}
+	if keys := unreachable[paddedID]; len(keys) != 1 {
+		t.Fatalf("a whitespace-padded but deliverable address must still be notified: %+v", unreachable)
 	}
 	for _, owner := range unreachableOwners {
 		var notified *time.Time
@@ -216,8 +236,13 @@ func TestMailStoreContractsIntegration(t *testing.T) {
 	if keys := reachable[silentID]; len(keys) != 1 || keys[0].Name != fmt.Sprintf("%s-unreachable-%d", marker, silentID) {
 		t.Fatalf("filling in the address must hand the key over once: %+v", reachable)
 	}
-	if len(reachable[inactiveID]) != 0 || len(reachable[blankID]) != 0 {
-		t.Fatalf("an inactive or blank-address owner must stay out of the notification: %+v", reachable)
+	if len(reachable[inactiveID]) != 0 {
+		t.Fatalf("an inactive owner must stay out of the notification: %+v", reachable)
+	}
+	for _, owner := range blankOwners {
+		if len(reachable[owner]) != 0 {
+			t.Fatalf("blank-address owner %d must stay out of the notification: %+v", owner, reachable)
+		}
 	}
 	if last, err := database.ExpiringAPIKeys(ctx, 7*24*time.Hour); err != nil || len(last[silentID]) != 0 {
 		t.Fatalf("the key must still be reported only once: %v %+v", err, last)
