@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/hkjang/jupiq/internal/auth"
+	"github.com/hkjang/jupiq/internal/mail"
 	"github.com/hkjang/jupiq/internal/store"
 )
 
@@ -100,6 +101,14 @@ func (s *Server) meUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := decodeJSON(r, &input); err != nil {
 		apiError(w, r, http.StatusBadRequest, "invalid_json", err.Error())
+		return
+	}
+	// 보낼 수 없는 주소를 조용히 저장하면 그 사용자만 알림을 못 받고 아무 데도
+	// 흔적이 남지 않는다. 판정은 메일이 실제로 쓰는 파서에 맡긴다 — 흉내 낸
+	// 검사를 하나 더 두면 두 파서가 갈린다. 빈 값은 "주소를 지운다"는 뜻이라
+	// 거부하지 않는다(users.email은 NOT NULL DEFAULT '').
+	if email := strings.TrimSpace(input.Email); email != "" && !mail.ValidAddress(email) {
+		apiError(w, r, http.StatusBadRequest, "invalid_email", "보낼 수 있는 이메일 주소를 입력하거나 비워 두세요")
 		return
 	}
 	p := principal(r)

@@ -165,6 +165,12 @@ func (s *Store) ListLocalUsers(ctx context.Context, page, pageSize int, search s
 }
 
 func (s *Store) UpsertOIDCUser(ctx context.Context, subject, username, displayName, email, department string, autoCreate bool) (User, error) {
+	// 생성·갱신 두 갈래가 같은 값을 쓰도록 여기서 한 번만 다듬는다. IdP가
+	// 넘기는 claim에는 공백이 섞여 오고, 다듬지 않으면 메일 수신자 해석이
+	// 그 주소를 버린다. 모양이 이상해도 거부하지는 않는다 — 로그인을 끊을 일이
+	// 아니다. username은 로그인 식별자라 건드리지 않는다.
+	displayName = strings.TrimSpace(displayName)
+	email = strings.TrimSpace(email)
 	var subjectUserID int64
 	created := false
 	err := s.Pool.QueryRow(ctx, `SELECT id FROM users WHERE external_subject=$1 AND auth_source='oidc'`, subject).Scan(&subjectUserID)
@@ -222,7 +228,10 @@ func (s *Store) UpdateProfile(ctx context.Context, userID int64, displayName, em
 	// Department is organization-owned identity data synchronized by an
 	// administrator or OIDC. A user may not move themselves between scopes via
 	// the personal profile endpoint.
-	result, err := s.Pool.Exec(ctx, `UPDATE users SET display_name=$2,email=$3,updated_at=now() WHERE id=$1`, userID, displayName, email)
+	// 주소는 저장 시점에 다듬는다. 다듬지 않으면 "\t bob@corp.internal \r\n"이
+	// 그대로 남아 메일 수신자 해석(mail.ValidAddress)이 버리고, 그 사용자만
+	// 흔적 없이 알림을 못 받는다. 빈 값은 "주소를 지운다"는 뜻이라 그대로 둔다.
+	result, err := s.Pool.Exec(ctx, `UPDATE users SET display_name=$2,email=$3,updated_at=now() WHERE id=$1`, userID, strings.TrimSpace(displayName), strings.TrimSpace(email))
 	if err != nil {
 		return User{}, err
 	}
