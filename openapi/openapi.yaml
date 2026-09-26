@@ -84,6 +84,7 @@ paths:
                 email: { type: string, format: email }
       responses:
         '200': { $ref: '#/components/responses/Success' }
+        '400': { $ref: '#/components/responses/Error' }
   /auth/oidc/config:
     get:
       security: []

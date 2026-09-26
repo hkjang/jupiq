@@ -170,9 +170,10 @@ func (s *Store) PruneMailDeliveries(ctx context.Context) error {
 // 주소가 없으면 Notify가 기록도 로그도 없이 돌아가므로, 표시부터 하면 그 키는
 // 흔적 없이 조용히 만료된다 — 나중에 주소를 채우면 그때 한 번 안내한다.
 // 다만 수신자 해석은 여기보다 좁다: resolve의 validAddress는 '@'가 없는
-// email='nonsense' 같은 주소도 버리므로, 그런 소유자의 키는 아직 표시만 되고
-// 안내되지 않는다. SQL로 주소 모양까지 흉내 내면 두 파서가 갈리므로, 그 계열은
-// UpdateProfile·UpsertOIDCUser의 입력 검증으로 막아야 한다.
+// email='nonsense' 같은 주소도 버린다. SQL로 주소 모양까지 흉내 내면 두 파서가
+// 갈리므로 그 계열은 입구에서 막는다 — 프로필 API가 mail.ValidAddress로 거부하고
+// UpdateProfile·UpsertOIDCUser가 저장 시점에 다듬는다. 그래도 관리자가 직접 넣은
+// 행처럼 입구를 지나지 않은 값은 남을 수 있어, 그런 키는 여기서 표시만 된다.
 func (s *Store) ExpiringAPIKeys(ctx context.Context, within time.Duration) (map[int64][]mail.ExpiringKey, error) {
 	rows, err := s.Pool.Query(ctx, `
 		UPDATE api_keys SET expiry_notified_at=now()

@@ -177,8 +177,9 @@ func TestMailStoreContractsIntegration(t *testing.T) {
 	if _, err := database.Pool.Exec(ctx, `UPDATE users SET active=false WHERE id=$1`, inactiveID); err != nil {
 		t.Fatal(err)
 	}
-	// UpdateProfile은 입력을 다듬지 않으므로 공백류만 든 주소가 실제로 저장된다.
-	// 공백 하나만이 아니라 탭·줄바꿈·NBSP까지 세운다 — Go의 TrimSpace가 지우는
+	// UpdateProfile은 이제 입력을 다듬어 저장하지만, 관리자가 직접 넣은 행이나
+	// 다듬기 이전에 저장된 행에는 공백류만 든 주소가 남아 있다(여기서도 직접
+	// INSERT한다). 공백 하나만이 아니라 탭·줄바꿈·NBSP까지 세운다 — Go의 TrimSpace가 지우는
 	// 문자는 전부 "보낼 곳이 없다"로 읽혀야 한다(btrim은 공백만 지워 여기서 갈렸다).
 	blankForms := map[string]string{
 		"spaces": "   ",
