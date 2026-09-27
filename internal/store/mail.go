@@ -117,9 +117,7 @@ type MailDeliveryPage struct {
 // ListMailDeliveries는 최신순 발송 기록이다. status가 비어 있지 않으면 그
 // 상태만 고른다.
 func (s *Store) ListMailDeliveries(ctx context.Context, status string, limit int) (MailDeliveryPage, error) {
-	if limit < 1 || limit > 200 {
-		limit = 50
-	}
+	limit = boundedLimit(limit, 50, 200)
 	page := MailDeliveryPage{Items: []mail.Delivery{}, Summary: map[string]int{}}
 	rows, err := s.Pool.Query(ctx, `
 		SELECT id,event,recipient,subject,reference,actor_user_id,status,attempts,error_message,created_at,updated_at

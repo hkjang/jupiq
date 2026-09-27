@@ -227,9 +227,7 @@ func (s *Store) ResourceConsumption(ctx context.Context, from, to time.Time, gro
 	if !ok {
 		groupBy, column = "user", "username"
 	}
-	if limit < 1 || limit > 500 {
-		limit = 100
-	}
+	limit = boundedLimit(limit, 100, 500)
 	var gpuEnabled struct {
 		GPUMonitoring bool `json:"gpu_monitoring"`
 	}
