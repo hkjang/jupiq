@@ -192,6 +192,19 @@ func (s *Store) Ping(ctx context.Context) error { return s.Pool.Ping(ctx) }
 
 const maxInt = int(^uint(0) >> 1)
 
+// boundedLimit은 목록 limit을 [1, max] 안으로 맞춘다. 상한을 넘겼다고 기본값으로
+// 떨어뜨리면 크게 요청한 쪽이 오히려 적게 받으므로(?limit=500이 50건), 초과분은
+// pageBounds와 같이 상한으로 자른다. fallback은 limit을 주지 않았을 때(0 이하)만 쓴다.
+func boundedLimit(limit, fallback, max int) int {
+	if limit < 1 {
+		limit = fallback
+	}
+	if limit > max {
+		limit = max
+	}
+	return limit
+}
+
 func pageBounds(page, pageSize int) (int, int, int) {
 	if page < 1 {
 		page = 1

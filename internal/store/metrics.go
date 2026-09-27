@@ -721,9 +721,7 @@ func GPUFeatureBlocked(metric string, gpuMonitoring bool) bool {
 }
 
 func (s *Store) Metrics(ctx context.Context, from, to time.Time, metric string, limit int) ([]map[string]any, bool, error) {
-	if limit <= 0 || limit > 5000 {
-		limit = 1000
-	}
+	limit = boundedLimit(limit, 1000, 5000)
 	var features struct {
 		GPUMonitoring bool `json:"gpu_monitoring"`
 	}
