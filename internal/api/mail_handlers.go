@@ -21,7 +21,14 @@ func (s *Server) mailDeliveries(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	page, err := s.Store.ListMailDeliveries(r.Context(), r.URL.Query().Get("status"), limit)
+	status := strings.TrimSpace(r.URL.Query().Get("status"))
+	switch status {
+	case "", mail.StatusQueued, mail.StatusSent, mail.StatusFailed:
+	default:
+		apiError(w, r, http.StatusBadRequest, "invalid_query", "status는 비우거나 queued, sent, failed 중 하나여야 합니다")
+		return
+	}
+	page, err := s.Store.ListMailDeliveries(r.Context(), status, limit)
 	if err != nil {
 		handleStoreError(w, r, err)
 		return
