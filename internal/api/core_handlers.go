@@ -404,6 +404,10 @@ func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
 	groupBy := r.URL.Query().Get("group_by")
 	if consumption, err := s.Store.ResourceConsumption(r.Context(), from, to, groupBy, 100); err == nil {
 		result["consumption"] = consumption
+		// 소비량은 시간별 롤업에서 나오고 그 표에는 추세가 아는 project 열이 없어,
+		// 같은 group_by라도 조용히 user로 되돌아간다. 어떤 축으로 묶인 목록인지
+		// 응답이 스스로 말하지 않으면 호출자가 trend와 같은 축으로 읽는다.
+		result["consumption_group_by"] = store.ConsumptionGroupBy(groupBy)
 	} else {
 		s.Logger.Warn("resource consumption unavailable", "error", err)
 	}

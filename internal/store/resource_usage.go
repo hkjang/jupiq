@@ -210,22 +210,37 @@ func (s *Store) RolledUpThrough(ctx context.Context) (time.Time, error) {
 	return through, err
 }
 
+// consumptionColumns maps a requested group to the hourly-rollup column that
+// aggregates it. The grouping column is chosen from this table, never
+// interpolated from the request, so a group_by value can never reach the query.
+// The rollup has no project column, so /usage의 trend가 아는 project는 여기
+// 없다 — 모르는 값은 user로 되돌아간다.
+var consumptionColumns = map[string]string{
+	"user":       "username",
+	"hub":        "hub_name",
+	"network":    "network",
+	"department": "department",
+}
+
+// ConsumptionGroupBy reports the group ResourceConsumption will actually
+// aggregate by. /usage는 같은 group_by를 추세와 소비량 두 경로에 넘기지만 아는
+// 값의 범위가 달라, 호출자가 한 응답 안의 두 목록을 같은 축으로 읽지 않으려면
+// 되돌림 결과를 물을 수 있어야 한다. 집계와 같은 표를 보므로 둘이 갈릴 수 없다.
+func ConsumptionGroupBy(groupBy string) string {
+	if _, ok := consumptionColumns[groupBy]; ok {
+		return groupBy
+	}
+	return "user"
+}
+
 // ResourceConsumption sums the hourly buckets into per-group totals. Unlike the
 // sample averages, these answer how much was consumed rather than how hard the
 // pods were working while they ran, and they keep working after the raw samples
 // behind them have been pruned.
 func (s *Store) ResourceConsumption(ctx context.Context, from, to time.Time, groupBy string, limit int) ([]map[string]any, error) {
-	// The grouping column is chosen from this table, never interpolated from
-	// the request, so a group_by value can never reach the query.
-	columns := map[string]string{
-		"user":       "username",
-		"hub":        "hub_name",
-		"network":    "network",
-		"department": "department",
-	}
-	column, ok := columns[groupBy]
+	column, ok := consumptionColumns[groupBy]
 	if !ok {
-		groupBy, column = "user", "username"
+		groupBy, column = "user", consumptionColumns["user"]
 	}
 	limit = boundedLimit(limit, 100, 500)
 	var gpuEnabled struct {
