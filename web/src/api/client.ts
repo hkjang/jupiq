@@ -27,9 +27,19 @@ export function apiUrl(path: string) {
 async function parseResponse(response: Response): Promise<unknown> {
   if (response.status === 204) return null
   const contentType = response.headers.get('content-type') || ''
-  if (contentType.includes('application/json')) return response.json()
   const text = await response.text()
-  return text ? { data: text } : null
+  if (!contentType.includes('application/json')) return text ? { data: text } : null
+  if (text.trim()) {
+    try {
+      return JSON.parse(text)
+    } catch {
+      // JSON을 자처한 본문이 깨져 있어도 아래에서 ApiError로 바꾼다.
+    }
+  }
+  // 오류 응답은 HTTP 상태가 이미 원인을 말하므로 본문 없는 오류와 같게 다룬다.
+  if (!response.ok) return null
+  // 성공 응답의 본문은 곧 결과이므로 해석할 수 없으면 조용히 빈 값을 돌려주지 않는다.
+  throw new ApiError(`서버 응답을 해석할 수 없습니다. (${response.status})`, response.status, 'INVALID_RESPONSE')
 }
 
 function errorMessage(body: unknown, fallback: string) {
