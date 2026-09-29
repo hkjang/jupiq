@@ -39,6 +39,12 @@ function errorMessage(body: unknown, fallback: string) {
   return envelope.error?.message || envelope.message || fallback
 }
 
+function httpError(body: unknown, status: number, fallback: string) {
+  const envelope = body && typeof body === 'object' ? (body as ErrorEnvelope) : undefined
+  const code = typeof envelope?.error === 'object' ? envelope.error?.code : undefined
+  return new ApiError(errorMessage(body, fallback), status, code)
+}
+
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers)
   if (init.body && !(init.body instanceof FormData)) headers.set('Content-Type', 'application/json')
@@ -52,9 +58,7 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   }
   const body = await parseResponse(response)
   if (!response.ok) {
-    const envelope = body && typeof body === 'object' ? (body as ErrorEnvelope) : undefined
-    const code = typeof envelope?.error === 'object' ? envelope.error?.code : undefined
-    throw new ApiError(errorMessage(body, `요청에 실패했습니다. (${response.status})`), response.status, code)
+    throw httpError(body, response.status, `요청에 실패했습니다. (${response.status})`)
   }
   if (body && typeof body === 'object' && 'data' in body) return (body as { data: T }).data
   return body as T
@@ -68,7 +72,7 @@ export async function requestList<T extends ApiRecord>(path: string): Promise<Li
     throw new ApiError(error instanceof Error ? error.message : '서버에 연결할 수 없습니다.', 0, 'NETWORK_ERROR')
   })
   const body = await parseResponse(response)
-  if (!response.ok) throw new ApiError(errorMessage(body, `목록을 불러오지 못했습니다. (${response.status})`), response.status)
+  if (!response.ok) throw httpError(body, response.status, `목록을 불러오지 못했습니다. (${response.status})`)
   if (Array.isArray(body)) return { data: body as T[], meta: { total: body.length } }
   if (body && typeof body === 'object') {
     const envelope = body as { data?: unknown; meta?: PageMeta }
@@ -151,7 +155,7 @@ export async function streamAI(
   })
   if (!response.ok) {
     const body = await parseResponse(response)
-    throw new ApiError(errorMessage(body, `AI 요청에 실패했습니다. (${response.status})`), response.status)
+    throw httpError(body, response.status, `AI 요청에 실패했습니다. (${response.status})`)
   }
   if (!response.body) throw new ApiError('스트리밍 응답을 읽을 수 없습니다.', 0)
 
